@@ -369,7 +369,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
             <div>
               <h3 className="text-lg font-bold text-white">Depósito Confirmado!</h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Os fundos foram creditados instantaneamente no seu saldo BetEsporte.
+                Os fundos foram creditados instantaneamente no seu saldo PrimasBet.
               </p>
             </div>
 

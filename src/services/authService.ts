@@ -9,8 +9,8 @@ const SETTINGS_KEY = 'betesporte_house_settings_v1';
 export const INITIAL_USERS: UserAccount[] = [
   {
     id: 'user-admin-1',
-    name: 'Gestão Administrativa BetEsporte',
-    email: 'admin@betesporte.br',
+    name: 'Gestão Administrativa PrimasBet',
+    email: 'admin@primasbet.br',
     cpf: '000.000.000-00',
     phone: '(11) 99999-0000',
     role: 'admin',
@@ -27,7 +27,7 @@ export const INITIAL_USERS: UserAccount[] = [
   {
     id: 'user-alex-2',
     name: 'Alexsander Otomeal',
-    email: 'alexsander@betesporte.br',
+    email: 'alexsander@primasbet.br',
     cpf: '123.456.789-00',
     phone: '(11) 98765-4321',
     role: 'user',
@@ -88,7 +88,7 @@ export const INITIAL_DEPOSIT_REQUESTS: DepositRequest[] = [
     status: 'APPROVED',
     endToEndId: 'E00038166202610051422a8934dfb1',
     reviewedAt: 'Hoje, 14:23',
-    reviewedBy: 'Admin BetEsporte',
+    reviewedBy: 'Admin PrimasBet',
   },
 ];
 

@@ -727,7 +727,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
         {/* Footer */}
         <div className="bg-[#161b22] border-t border-[#21262d] px-4 py-2.5 flex items-center justify-between text-xs text-slate-400">
-          <span>Ambiente de Produção BetEsporte · Acesso Restrito aos Administradores</span>
+          <span>Ambiente de Produção PrimasBet · Acesso Restrito aos Administradores</span>
           <button
             onClick={onClose}
             className="px-4 py-1.5 rounded-lg bg-[#21262d] hover:bg-[#30363d] text-white font-medium"

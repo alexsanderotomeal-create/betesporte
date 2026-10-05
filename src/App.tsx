@@ -896,7 +896,7 @@ export default function App() {
       <footer className="bg-[#0d1117] border-t border-[#21262d] py-6 px-4 text-center text-xs text-slate-500 mt-auto">
         <div className="max-w-[1720px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-slate-400">
-            <span className="font-extrabold text-white">BET<span className="text-[#00e701]">ESPORTE</span> PRO</span>
+            <span className="font-extrabold text-white">PRIMAS<span className="text-[#00e701]">BET</span> PRO</span>
             <span>·</span>
             <span>Sistema Oficial de Apostas Esportivas & Políticas</span>
           </div>

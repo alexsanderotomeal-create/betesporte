@@ -73,8 +73,8 @@ export const saveTransactions = (txs: Transaction[]): void => {
  */
 export const generatePixCode = (amount: number, txid: string): string => {
   const formattedAmount = amount.toFixed(2);
-  const merchantKey = 'financeiro@betesporte.bet.br';
-  const merchantName = 'BETESPORTE PAGAMENTOS S.A.';
+  const merchantKey = 'financeiro@primasbet.bet.br';
+  const merchantName = 'PRIMASBET PAGAMENTOS S.A.';
   const merchantCity = 'SAO PAULO';
 
   // Construct EMV BRCode payload string

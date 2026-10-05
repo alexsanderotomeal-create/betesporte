@@ -81,7 +81,7 @@ export const testExternalApiConnection = async (url: string, apiKey: string): Pr
       latencyMs: Math.max(28, latency),
       message: `Modo Híbrido Ativo: Simulador conectado em alta frequência (${errorMsg.includes('abort') ? 'Timeout' : 'Simulação de feed externo OK'})`,
       sampleData: {
-        feed: 'BetEsporte Sports Feed v2.4',
+        feed: 'PrimasBet Sports Feed v2.4',
         provider: 'Opta/SportRadar Bridge',
         activeMatches: 6,
         latency: `${latency}ms`,

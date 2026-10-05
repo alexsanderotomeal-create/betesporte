@@ -89,7 +89,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex flex-col">
               <div className="flex items-center gap-1">
                 <span className="text-xl font-extrabold tracking-tight text-white font-sans">
-                  BET<span className="text-[#00e701]">ESPORTE</span>
+                  PRIMAS<span className="text-[#00e701]">BET</span>
                 </span>
                 <span className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#00e701]/10 text-[#00e701] border border-[#00e701]/30 rounded">
                   PRO
