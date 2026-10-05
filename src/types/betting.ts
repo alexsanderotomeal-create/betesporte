@@ -1,4 +1,4 @@
-export type SportId = 'football' | 'basketball' | 'tennis' | 'esports' | 'volleyball' | 'mma';
+export type SportId = 'football' | 'basketball' | 'tennis' | 'esports' | 'volleyball' | 'mma' | 'politics';
 
 export type MatchStatus = 'LIVE' | 'SCHEDULED' | 'HALFTIME' | 'FINISHED';
 

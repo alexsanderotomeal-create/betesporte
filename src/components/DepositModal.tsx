@@ -14,17 +14,22 @@ import {
 import confetti from 'canvas-confetti';
 import { generatePixCode, generatePixQrCodeDataUrl } from '../services/paymentService';
 import { Transaction } from '../types/betting';
+import { UserAccount, DepositRequest } from '../types/auth';
 
 interface DepositModalProps {
   isOpen: boolean;
   onClose: () => void;
+  currentUser?: UserAccount | null;
   onDepositSuccess: (amount: number, bonusAmount: number, tx: Transaction) => void;
+  onRequestDepositApproval?: (req: DepositRequest) => void;
 }
 
 export const DepositModal: React.FC<DepositModalProps> = ({
   isOpen,
   onClose,
+  currentUser,
   onDepositSuccess,
+  onRequestDepositApproval,
 }) => {
   const [amount, setAmount] = useState<number>(50);
   const [customAmount, setCustomAmount] = useState<string>('50');
@@ -302,7 +307,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
               Abra o app do seu banco, escolha <strong>Pagar com PIX</strong>, aponte a câmera para o QR Code ou cole o código acima.
             </p>
 
-            {/* Webhook Test Simulation Button */}
+            {/* Action Buttons: Instant Approval OR Send to Admin Review */}
             <div className="w-full pt-2 border-t border-[#21262d] flex flex-col gap-2">
               <button
                 disabled={isProcessingSimulated}
@@ -318,6 +323,32 @@ export const DepositModal: React.FC<DepositModalProps> = ({
                   </>
                 )}
               </button>
+
+              <button
+                onClick={() => {
+                  const req: DepositRequest = {
+                    id: `dep-req-${Date.now()}`,
+                    userId: currentUser?.id || 'guest',
+                    userName: currentUser?.name || 'Apostador Convidado',
+                    userCpf: currentUser?.cpf || '123.456.789-00',
+                    amount: amount,
+                    bonusAmount: includeBonus ? amount : 0,
+                    txid: `PIX-DEP-${Math.floor(10000000 + Math.random() * 90000000)}`,
+                    pixCode: pixPayload,
+                    date: 'Agora',
+                    status: 'PENDING',
+                    endToEndId: `E0003816620261005${Date.now().toString().slice(-12)}`,
+                    notes: 'Aguardando validação e aprovação manual da administração',
+                  };
+                  onRequestDepositApproval?.(req);
+                  alert('Comprovante enviado com sucesso! O Administrador já pode aprovar no Painel Admin.');
+                  onClose();
+                }}
+                className="w-full py-2 rounded-xl bg-[#21262d] hover:bg-[#30363d] text-amber-300 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-colors border border-amber-500/30"
+              >
+                <span>Enviar para Aprovação Manual do Admin</span>
+              </button>
+
               <button
                 onClick={() => setStep('amount')}
                 className="text-xs text-slate-400 hover:text-white"

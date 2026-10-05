@@ -13,17 +13,29 @@ import {
   Menu, 
   X,
   ShieldCheck,
-  Radio
+  Radio,
+  User,
+  Shield,
+  LogOut,
+  Sliders,
+  Sparkles
 } from 'lucide-react';
 import { UserWallet } from '../types/betting';
+import { UserAccount } from '../types/auth';
 
 interface HeaderProps {
   wallet: UserWallet;
+  currentUser: UserAccount | null;
   liveMatchesCount: number;
   onOpenDeposit: () => void;
   onOpenWithdraw: () => void;
   onOpenApiModal: () => void;
   onOpenHistory: () => void;
+  onOpenAuth: (mode: 'login' | 'register') => void;
+  onOpenDashboard: () => void;
+  onOpenAdminPanel: () => void;
+  onLogout: () => void;
+  pendingDepositsCount: number;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   activeSportFilter: string;
@@ -36,11 +48,17 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   wallet,
+  currentUser,
   liveMatchesCount,
   onOpenDeposit,
   onOpenWithdraw,
   onOpenApiModal,
   onOpenHistory,
+  onOpenAuth,
+  onOpenDashboard,
+  onOpenAdminPanel,
+  onLogout,
+  pendingDepositsCount,
   searchQuery,
   onSearchChange,
   activeSportFilter,
@@ -51,7 +69,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleAutoAcceptOdds,
 }) => {
   const [showBalance, setShowBalance] = useState(true);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [settingsDropdownOpen, setSettingsDropdownOpen] = useState(false);
 
   const formatCurrency = (val: number) => {
@@ -62,16 +80,8 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="sticky top-0 z-40 bg-[#0d1117] border-b border-[#21262d] shadow-lg">
       {/* Top Branding & Main Controls Bar */}
       <div className="max-w-[1720px] mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-2 sm:gap-4">
-        {/* Brand Logo & Mobile Toggle */}
+        {/* Brand Logo */}
         <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="lg:hidden p-2 text-slate-400 hover:text-white rounded-lg hover:bg-[#161b22]"
-            aria-label="Abrir menu"
-          >
-            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-          </button>
-
           <a href="#" className="flex items-center gap-2 group">
             <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#00e701] to-[#00a801] flex items-center justify-center shadow-md shadow-[#00e701]/20 group-hover:scale-105 transition-transform">
               <Zap className="w-5 h-5 text-black font-extrabold fill-black" />
@@ -86,7 +96,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               </div>
               <span className="text-[9px] text-slate-400 -mt-1 hidden sm:block tracking-wide">
-                Apostas Esportivas Oficiais
+                Apostas Esportivas & Políticas
               </span>
             </div>
           </a>
@@ -98,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Buscar times, ligas ou eventos..."
+              placeholder="Buscar times, ligas, eleições ou candidatos..."
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               className="w-full bg-[#161b22] border border-[#30363d] focus:border-[#00e701] rounded-lg pl-9 pr-4 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
@@ -114,12 +124,31 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* User Balance, Actions & Third-Party API Status */}
+        {/* User Balance, Admin Panel, Actions & Auth */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Admin Panel Quick Access Button (Always accessible or prominent if admin) */}
+          <button
+            onClick={onOpenAdminPanel}
+            className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+              currentUser?.role === 'admin'
+                ? 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/50 shadow-sm'
+                : 'bg-[#161b22] border-[#30363d] text-slate-300 hover:text-white'
+            }`}
+            title="Acessar Painel de Controle Administrativo"
+          >
+            <Shield className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Admin</span>
+            {pendingDepositsCount > 0 && (
+              <span className="px-1.5 py-0.2 bg-amber-400 text-black font-extrabold rounded-full text-[10px] font-mono animate-pulse">
+                {pendingDepositsCount}
+              </span>
+            )}
+          </button>
+
           {/* API Integration / Simulator Status Button */}
           <button
             onClick={onOpenApiModal}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-[#00e701]/50 text-slate-300 hover:text-white text-xs transition-colors"
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-[#00e701]/50 text-slate-300 hover:text-white text-xs transition-colors"
             title="Configurar Integração de API Esportiva / Simulador em Tempo Real"
           >
             <span className="relative flex h-2 w-2">
@@ -131,7 +160,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {/* User Wallet Balance Box */}
-          <div className="flex items-center bg-[#161b22] border border-[#30363d] rounded-lg px-2.5 sm:px-3 py-1.5 gap-2">
+          <div className="flex items-center bg-[#161b22] border border-[#30363d] rounded-lg px-2 sm:px-3 py-1.5 gap-2">
             <div className="flex flex-col text-right">
               <div className="flex items-center justify-end gap-1.5">
                 <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">
@@ -170,7 +199,7 @@ export const Header: React.FC<HeaderProps> = ({
 
               <button
                 onClick={onOpenWithdraw}
-                className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-[#21262d] hover:bg-[#30363d] text-slate-200 hover:text-white text-xs font-semibold transition-colors"
+                className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-[#21262d] hover:bg-[#30363d] text-slate-200 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
                 title="Sacar via PIX"
               >
                 <ArrowUpRight className="w-3.5 h-3.5 text-slate-400" />
@@ -179,46 +208,115 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Transaction History & Settings dropdown */}
+          {/* User Auth / Profile Dropdown */}
+          {currentUser ? (
+            <div className="relative">
+              <button
+                onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+                className="flex items-center gap-2 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-slate-500 text-slate-200 transition-colors"
+              >
+                <div className="w-6 h-6 rounded-full bg-[#00e701]/20 border border-[#00e701]/40 flex items-center justify-center text-[#00e701] font-bold text-xs">
+                  {currentUser.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="hidden md:flex flex-col text-left">
+                  <span className="text-xs font-bold text-white truncate max-w-[100px] leading-tight">
+                    {currentUser.name.split(' ')[0]}
+                  </span>
+                  <span className="text-[9px] text-[#00e701] uppercase font-semibold">
+                    {currentUser.role === 'admin' ? 'Admin' : 'Apostador'}
+                  </span>
+                </div>
+              </button>
+
+              {userDropdownOpen && (
+                <div 
+                  className="absolute right-0 mt-2 w-56 bg-[#161b22] border border-[#30363d] rounded-xl shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                  onClick={() => setUserDropdownOpen(false)}
+                >
+                  <div className="px-3 py-2 border-b border-[#21262d]">
+                    <div className="text-xs font-bold text-white truncate">{currentUser.name}</div>
+                    <div className="text-[11px] text-slate-400 truncate">{currentUser.email}</div>
+                    <div className="text-[10px] text-emerald-400 font-semibold mt-0.5">
+                      CPF: {currentUser.cpf}
+                    </div>
+                  </div>
+
+                  <div className="py-1">
+                    <button
+                      onClick={onOpenDashboard}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-200 hover:bg-[#21262d] rounded-lg transition-colors text-left"
+                    >
+                      <User className="w-3.5 h-3.5 text-[#00e701]" />
+                      <span>Meu Painel & Limites</span>
+                    </button>
+
+                    <button
+                      onClick={onOpenHistory}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-200 hover:bg-[#21262d] rounded-lg transition-colors text-left"
+                    >
+                      <History className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Extrato & Transações PIX</span>
+                    </button>
+
+                    <button
+                      onClick={onOpenAdminPanel}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-amber-300 hover:bg-[#21262d] rounded-lg transition-colors text-left font-semibold"
+                    >
+                      <Shield className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Painel de Gestão Admin</span>
+                    </button>
+                  </div>
+
+                  <div className="border-t border-[#21262d] pt-1">
+                    <button
+                      onClick={onLogout}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors text-left"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Encerrar Sessão</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => onOpenAuth('login')}
+                className="px-3 py-1.5 rounded-lg bg-[#21262d] hover:bg-[#30363d] text-slate-200 text-xs font-bold transition-colors cursor-pointer"
+              >
+                Entrar
+              </button>
+              <button
+                onClick={() => onOpenAuth('register')}
+                className="px-3 py-1.5 rounded-lg bg-[#00e701] hover:bg-[#00c901] text-black text-xs font-extrabold uppercase transition-all shadow-sm cursor-pointer"
+              >
+                Cadastrar
+              </button>
+            </div>
+          )}
+
+          {/* Quick Odds Settings */}
           <div className="relative">
             <button
               onClick={() => setSettingsDropdownOpen(!settingsDropdownOpen)}
               className="p-2 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-slate-500 text-slate-300 hover:text-white transition-colors"
-              aria-label="Configurações e Extrato"
+              aria-label="Configurações de Odds"
             >
               <Settings className="w-4 h-4" />
             </button>
 
             {settingsDropdownOpen && (
               <div 
-                className="absolute right-0 mt-2 w-56 bg-[#161b22] border border-[#30363d] rounded-xl shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                className="absolute right-0 mt-2 w-52 bg-[#161b22] border border-[#30363d] rounded-xl shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
                 onClick={() => setSettingsDropdownOpen(false)}
               >
-                <div className="px-3 py-2 border-b border-[#21262d]">
-                  <div className="text-xs font-semibold text-white">Minha Conta</div>
-                  <div className="text-[11px] text-slate-400 truncate">apostador@betesporte.br</div>
+                <div className="px-3 py-1.5 border-b border-[#21262d]">
+                  <div className="text-xs font-semibold text-white">Preferências</div>
                 </div>
 
-                <div className="py-1">
-                  <button
-                    onClick={onOpenHistory}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-200 hover:bg-[#21262d] rounded-lg transition-colors text-left"
-                  >
-                    <History className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Extrato e Transações PIX</span>
-                  </button>
-
-                  <button
-                    onClick={onOpenWithdraw}
-                    className="w-full flex sm:hidden items-center gap-2.5 px-3 py-2 text-xs text-slate-200 hover:bg-[#21262d] rounded-lg transition-colors text-left"
-                  >
-                    <ArrowUpRight className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Solicitar Saque PIX</span>
-                  </button>
-                </div>
-
-                <div className="border-t border-[#21262d] pt-2 px-3 pb-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                <div className="py-2 px-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
                     Regra de Cotações
                   </div>
                   <button
@@ -234,7 +332,7 @@ export const Header: React.FC<HeaderProps> = ({
                     </span>
                   </button>
 
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mt-2 mb-1.5">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mt-2.5 mb-1">
                     Formato de Odds
                   </div>
                   <div className="grid grid-cols-3 gap-1">
@@ -291,6 +389,20 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
+              onClick={() => onSelectSport('politics')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                activeSportFilter === 'politics' 
+                  ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-black shadow-md' 
+                  : 'text-amber-300 hover:text-white hover:bg-[#1a202c]'
+              }`}
+            >
+              <span>🗳️ Eleições Presidenciais</span>
+              <span className="px-1 py-0.2 bg-amber-950/60 text-amber-200 border border-amber-400/40 rounded text-[9px] font-extrabold uppercase">
+                Em Alta
+              </span>
+            </button>
+
+            <button
               onClick={() => onSelectSport('football')}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
                 activeSportFilter === 'football' 
@@ -331,7 +443,7 @@ export const Header: React.FC<HeaderProps> = ({
                   : 'text-slate-300 hover:text-white hover:bg-[#1a202c]'
               }`}
             >
-              🎮 E-Sports (CS2 / LoL)
+              🎮 E-Sports
             </button>
           </nav>
 

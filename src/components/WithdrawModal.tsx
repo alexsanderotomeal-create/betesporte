@@ -8,19 +8,24 @@ import {
   Lock
 } from 'lucide-react';
 import { UserWallet, Transaction } from '../types/betting';
+import { UserAccount, WithdrawRequest } from '../types/auth';
 
 interface WithdrawModalProps {
   isOpen: boolean;
   onClose: () => void;
   wallet: UserWallet;
+  currentUser?: UserAccount | null;
   onWithdrawSuccess: (amount: number, tx: Transaction) => void;
+  onRequestWithdrawApproval?: (req: WithdrawRequest) => void;
 }
 
 export const WithdrawModal: React.FC<WithdrawModalProps> = ({
   isOpen,
   onClose,
   wallet,
+  currentUser,
   onWithdrawSuccess,
+  onRequestWithdrawApproval,
 }) => {
   const [pixKeyType, setPixKeyType] = useState<'cpf' | 'phone' | 'email' | 'random'>('cpf');
   const [pixKey, setPixKey] = useState<string>('123.456.789-00');
@@ -68,6 +73,20 @@ export const WithdrawModal: React.FC<WithdrawModalProps> = ({
       };
 
       onWithdrawSuccess(numAmount, tx);
+
+      onRequestWithdrawApproval?.({
+        id: `wdr-req-${Date.now()}`,
+        userId: currentUser?.id || 'guest',
+        userName: currentUser?.name || 'Apostador Convidado',
+        userCpf: currentUser?.cpf || '123.456.789-00',
+        amount: numAmount,
+        pixKeyType: pixKeyType.toUpperCase(),
+        pixKey,
+        date: 'Agora',
+        status: 'PENDING',
+        notes: `Saque solicitado para chave ${pixKeyType.toUpperCase()}`,
+      });
+
       setSuccessReceipt(tx);
       setIsProcessing(false);
     }, 1500);

@@ -29,7 +29,8 @@ export const SportsSidebar: React.FC<SportsSidebarProps> = ({
   onSelectTimeFilter,
 }) => {
   const sports = [
-    { id: 'all', name: 'Todos os Esportes', icon: '🌐', count: 7 },
+    { id: 'all', name: 'Todos os Esportes', icon: '🌐', count: 9 },
+    { id: 'politics', name: 'Eleições Presidenciais', icon: '🗳️', count: 2 },
     { id: 'football', name: 'Futebol', icon: '⚽', count: 4 },
     { id: 'basketball', name: 'Basquete', icon: '🏀', count: 1 },
     { id: 'tennis', name: 'Tênis', icon: '🎾', count: 1 },
@@ -39,6 +40,7 @@ export const SportsSidebar: React.FC<SportsSidebarProps> = ({
   ];
 
   const featuredLeagues = [
+    { name: 'Eleições Presidenciais', country: '🇧🇷 Brasil', sport: 'politics' },
     { name: 'Brasileirão Série A', country: '🇧🇷 Brasil', sport: 'football' },
     { name: 'UEFA Champions League', country: '🇪🇺 Europa', sport: 'football' },
     { name: 'Premier League', country: '🏴󠁧󠁢󠁥󠁮󠁧󠁿 Inglaterra', sport: 'football' },

@@ -11,6 +11,12 @@ import {
   ApiConnectionConfig 
 } from './types/betting';
 import { 
+  UserAccount, 
+  DepositRequest, 
+  WithdrawRequest, 
+  HouseSettings 
+} from './types/auth';
+import { 
   updateMatchOddsDynamically, 
   triggerEventOnMatch, 
   toggleMarketSuspension, 
@@ -26,6 +32,19 @@ import {
   loadApiConfig, 
   saveApiConfig 
 } from './services/sportsApi';
+import { 
+  loadUsers, 
+  saveUsers, 
+  loadCurrentUser, 
+  saveCurrentUser, 
+  loadDepositRequests, 
+  saveDepositRequests, 
+  loadWithdrawRequests, 
+  saveWithdrawRequests, 
+  loadHouseSettings, 
+  saveHouseSettings 
+} from './services/authService';
+
 import { Header } from './components/Header';
 import { SportsSidebar } from './components/SportsSidebar';
 import { LivePitchTracker } from './components/LivePitchTracker';
@@ -36,6 +55,9 @@ import { DepositModal } from './components/DepositModal';
 import { WithdrawModal } from './components/WithdrawModal';
 import { TransactionHistoryModal } from './components/TransactionHistoryModal';
 import { ApiSimulatorModal } from './components/ApiSimulatorModal';
+import { AuthModal } from './components/AuthModal';
+import { UserDashboardModal } from './components/UserDashboardModal';
+import { AdminPanelModal } from './components/AdminPanelModal';
 
 const INITIAL_TICKETS: BetTicket[] = [
   {
@@ -95,9 +117,8 @@ const INITIAL_TICKETS: BetTicket[] = [
 ];
 
 export default function App() {
-  // Main states
+  // Main sports & betting states
   const [matches, setMatches] = useState<Match[]>(INITIAL_MATCHES);
-  const [wallet, setWallet] = useState<UserWallet>(loadWallet);
   const [transactions, setTransactions] = useState<Transaction[]>(loadTransactions);
   const [tickets, setTickets] = useState<BetTicket[]>(() => {
     try {
@@ -112,6 +133,17 @@ export default function App() {
   const [apiConfig, setApiConfig] = useState<ApiConnectionConfig>(loadApiConfig);
   const [isEngineRunning, setIsEngineRunning] = useState<boolean>(true);
 
+  // User Accounts & Authentication states
+  const [users, setUsers] = useState<UserAccount[]>(loadUsers);
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(loadCurrentUser);
+  const [wallet, setWallet] = useState<UserWallet>(() => {
+    const user = loadCurrentUser();
+    return user ? user.wallet : loadWallet();
+  });
+  const [depositRequests, setDepositRequests] = useState<DepositRequest[]>(loadDepositRequests);
+  const [withdrawRequests, setWithdrawRequests] = useState<WithdrawRequest[]>(loadWithdrawRequests);
+  const [houseSettings, setHouseSettings] = useState<HouseSettings>(loadHouseSettings);
+
   // Filters & Settings
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedSport, setSelectedSport] = useState<string>('all');
@@ -121,13 +153,19 @@ export default function App() {
   const [autoAcceptOdds, setAutoAcceptOdds] = useState<boolean>(true);
   const [activeTrackerMatchId, setActiveTrackerMatchId] = useState<string>('match-fla-pal');
 
-  // Modals
+  // Modals state
   const [isDepositOpen, setIsDepositOpen] = useState<boolean>(false);
   const [isWithdrawOpen, setIsWithdrawOpen] = useState<boolean>(false);
   const [isApiModalOpen, setIsApiModalOpen] = useState<boolean>(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
   const [detailMatch, setDetailMatch] = useState<Match | null>(null);
   const [isMobileSlipOpen, setIsMobileSlipOpen] = useState<boolean>(false);
+
+  // Auth & Admin Modals
+  const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
+  const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register'>('login');
+  const [isDashboardOpen, setIsDashboardOpen] = useState<boolean>(false);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState<boolean>(false);
 
   // Save tickets to localStorage
   useEffect(() => {
@@ -149,6 +187,32 @@ export default function App() {
   const liveCount = useMemo(() => {
     return matches.filter((m) => m.status === 'LIVE').length;
   }, [matches]);
+
+  // Pending deposits count for admin badge
+  const pendingDepositsCount = useMemo(() => {
+    return depositRequests.filter((d) => d.status === 'PENDING').length;
+  }, [depositRequests]);
+
+  // Helper to persist user wallet updates across users state and currentUser
+  const syncWalletToUser = (updatedWallet: UserWallet) => {
+    setWallet(updatedWallet);
+    saveWallet(updatedWallet);
+
+    if (currentUser) {
+      const updatedCurrent: UserAccount = {
+        ...currentUser,
+        wallet: updatedWallet,
+      };
+      setCurrentUser(updatedCurrent);
+      saveCurrentUser(updatedCurrent);
+
+      setUsers((prevUsers) => {
+        const nextUsers = prevUsers.map((u) => (u.id === currentUser.id ? updatedCurrent : u));
+        saveUsers(nextUsers);
+        return nextUsers;
+      });
+    }
+  };
 
   // REAL-TIME ENGINE LOOP: Dynamic odds ticker and game minute advancements
   useEffect(() => {
@@ -302,6 +366,12 @@ export default function App() {
     type: 'single' | 'multiple',
     currentSelections: BetSelection[]
   ): boolean => {
+    if (!currentUser) {
+      setAuthInitialMode('login');
+      setIsAuthOpen(true);
+      return false;
+    }
+
     const totalBalance = wallet.realBalance + wallet.bonusBalance;
     if (stake > totalBalance) return false;
 
@@ -322,8 +392,7 @@ export default function App() {
       realBalance: Number(newReal.toFixed(2)),
       bonusBalance: Number(newBonus.toFixed(2)),
     };
-    setWallet(updatedWallet);
-    saveWallet(updatedWallet);
+    syncWalletToUser(updatedWallet);
 
     // Calculate total odd & potential return
     const totalOdd = currentSelections.reduce((acc, s) => acc * s.odd, 1);
@@ -381,8 +450,7 @@ export default function App() {
       ...wallet,
       realBalance: Number((wallet.realBalance + amount).toFixed(2)),
     };
-    setWallet(updatedWallet);
-    saveWallet(updatedWallet);
+    syncWalletToUser(updatedWallet);
 
     setTickets((prev) =>
       prev.map((t) => {
@@ -419,8 +487,7 @@ export default function App() {
       realBalance: Number((wallet.realBalance + amount).toFixed(2)),
       bonusBalance: Number((wallet.bonusBalance + bonusAmount).toFixed(2)),
     };
-    setWallet(updatedWallet);
-    saveWallet(updatedWallet);
+    syncWalletToUser(updatedWallet);
 
     const updatedTxs = [tx, ...transactions];
     setTransactions(updatedTxs);
@@ -432,12 +499,244 @@ export default function App() {
       ...wallet,
       realBalance: Number(Math.max(0, wallet.realBalance - amount).toFixed(2)),
     };
-    setWallet(updatedWallet);
-    saveWallet(updatedWallet);
+    syncWalletToUser(updatedWallet);
 
     const updatedTxs = [tx, ...transactions];
     setTransactions(updatedTxs);
     saveTransactions(updatedTxs);
+  };
+
+  // Auth Handlers
+  const handleLogin = (user: UserAccount) => {
+    setCurrentUser(user);
+    saveCurrentUser(user);
+    setWallet(user.wallet);
+    saveWallet(user.wallet);
+  };
+
+  const handleRegister = (newUser: UserAccount) => {
+    setUsers((prev) => {
+      const next = [newUser, ...prev];
+      saveUsers(next);
+      return next;
+    });
+    handleLogin(newUser);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    saveCurrentUser(null);
+  };
+
+  const handleUserUpdateLimit = (newLimit: number) => {
+    if (currentUser) {
+      const updated = { ...currentUser, dailyDepositLimit: newLimit };
+      setCurrentUser(updated);
+      saveCurrentUser(updated);
+      setUsers((prev) => {
+        const next = prev.map((u) => (u.id === currentUser.id ? updated : u));
+        saveUsers(next);
+        return next;
+      });
+    }
+  };
+
+  // Admin Backoffice Handlers
+  const handleApproveDeposit = (requestId: string) => {
+    const req = depositRequests.find((d) => d.id === requestId);
+    if (!req) return;
+
+    // Mark as approved
+    const updatedReqs = depositRequests.map((d) =>
+      d.id === requestId
+        ? {
+            ...d,
+            status: 'APPROVED' as const,
+            reviewedAt: 'Agora',
+            reviewedBy: currentUser?.name || 'Administrador',
+          }
+        : d
+    );
+    setDepositRequests(updatedReqs);
+    saveDepositRequests(updatedReqs);
+
+    // Credit target user
+    setUsers((prevUsers) => {
+      const nextUsers = prevUsers.map((u) => {
+        if (u.id === req.userId) {
+          const nextWallet: UserWallet = {
+            ...u.wallet,
+            realBalance: Number((u.wallet.realBalance + req.amount).toFixed(2)),
+            bonusBalance: Number((u.wallet.bonusBalance + req.bonusAmount).toFixed(2)),
+          };
+          // If approved user is the current active session
+          if (currentUser?.id === u.id) {
+            setWallet(nextWallet);
+            setCurrentUser({ ...u, wallet: nextWallet });
+          }
+          return { ...u, wallet: nextWallet };
+        }
+        return u;
+      });
+      saveUsers(nextUsers);
+      return nextUsers;
+    });
+
+    // Add transaction record
+    const newTx: Transaction = {
+      id: `tx-appr-${Date.now()}`,
+      type: 'DEPOSIT_PIX',
+      amount: req.amount,
+      status: 'COMPLETED',
+      date: 'Agora',
+      description: `Depósito Aprovado pelo Administrador para ${req.userName}`,
+      endToEndId: req.endToEndId,
+      txid: req.txid,
+    };
+    const updatedTxs = [newTx, ...transactions];
+    setTransactions(updatedTxs);
+    saveTransactions(updatedTxs);
+
+    playSoundEffect('goal');
+  };
+
+  const handleRejectDeposit = (requestId: string) => {
+    const updatedReqs = depositRequests.map((d) =>
+      d.id === requestId
+        ? {
+            ...d,
+            status: 'REJECTED' as const,
+            reviewedAt: 'Agora',
+            reviewedBy: currentUser?.name || 'Administrador',
+          }
+        : d
+    );
+    setDepositRequests(updatedReqs);
+    saveDepositRequests(updatedReqs);
+  };
+
+  const handleApproveWithdraw = (requestId: string) => {
+    const updatedReqs = withdrawRequests.map((w) =>
+      w.id === requestId
+        ? {
+            ...w,
+            status: 'APPROVED' as const,
+            reviewedAt: 'Agora',
+            reviewedBy: currentUser?.name || 'Administrador',
+            endToEndId: `E0003816620261005${Date.now().toString().slice(-12)}`,
+          }
+        : w
+    );
+    setWithdrawRequests(updatedReqs);
+    saveWithdrawRequests(updatedReqs);
+  };
+
+  const handleRejectWithdraw = (requestId: string) => {
+    const req = withdrawRequests.find((w) => w.id === requestId);
+    if (!req) return;
+
+    const updatedReqs = withdrawRequests.map((w) =>
+      w.id === requestId
+        ? {
+            ...w,
+            status: 'REJECTED' as const,
+            reviewedAt: 'Agora',
+            reviewedBy: currentUser?.name || 'Administrador',
+          }
+        : w
+    );
+    setWithdrawRequests(updatedReqs);
+    saveWithdrawRequests(updatedReqs);
+
+    // Refund target user
+    setUsers((prevUsers) => {
+      const nextUsers = prevUsers.map((u) => {
+        if (u.id === req.userId) {
+          const nextWallet: UserWallet = {
+            ...u.wallet,
+            realBalance: Number((u.wallet.realBalance + req.amount).toFixed(2)),
+          };
+          if (currentUser?.id === u.id) {
+            setWallet(nextWallet);
+            setCurrentUser({ ...u, wallet: nextWallet });
+          }
+          return { ...u, wallet: nextWallet };
+        }
+        return u;
+      });
+      saveUsers(nextUsers);
+      return nextUsers;
+    });
+  };
+
+  const handleToggleUserStatus = (userId: string) => {
+    setUsers((prev) => {
+      const next = prev.map((u) => {
+        if (u.id === userId) {
+          const nextStatus = u.status === 'active' ? ('blocked' as const) : ('active' as const);
+          if (currentUser?.id === userId) {
+            setCurrentUser({ ...currentUser, status: nextStatus });
+          }
+          return { ...u, status: nextStatus };
+        }
+        return u;
+      });
+      saveUsers(next);
+      return next;
+    });
+  };
+
+  const handleManualCreditUser = (userId: string, amount: number) => {
+    setUsers((prev) => {
+      const next = prev.map((u) => {
+        if (u.id === userId) {
+          const nextWallet: UserWallet = {
+            ...u.wallet,
+            realBalance: Number((u.wallet.realBalance + amount).toFixed(2)),
+          };
+          if (currentUser?.id === userId) {
+            setWallet(nextWallet);
+            setCurrentUser({ ...currentUser, wallet: nextWallet });
+          }
+          return { ...u, wallet: nextWallet };
+        }
+        return u;
+      });
+      saveUsers(next);
+      return next;
+    });
+
+    const newTx: Transaction = {
+      id: `tx-cred-${Date.now()}`,
+      type: 'DEPOSIT_PIX',
+      amount: amount,
+      status: 'COMPLETED',
+      date: 'Agora',
+      description: `Crédito Manual Injetado pelo Administrador`,
+    };
+    setTransactions((prev) => [newTx, ...prev]);
+  };
+
+  const handleSaveHouseSettings = (newSettings: HouseSettings) => {
+    setHouseSettings(newSettings);
+    saveHouseSettings(newSettings);
+  };
+
+  // Queue submission from Deposit/Withdraw modals
+  const handleQueueDepositRequest = (req: DepositRequest) => {
+    setDepositRequests((prev) => {
+      const next = [req, ...prev];
+      saveDepositRequests(next);
+      return next;
+    });
+  };
+
+  const handleQueueWithdrawRequest = (req: WithdrawRequest) => {
+    setWithdrawRequests((prev) => {
+      const next = [req, ...prev];
+      saveWithdrawRequests(next);
+      return next;
+    });
   };
 
   // Live Event Sandbox Handlers
@@ -488,7 +787,8 @@ export default function App() {
         const matchesQuery =
           m.homeTeam.toLowerCase().includes(q) ||
           m.awayTeam.toLowerCase().includes(q) ||
-          m.league.toLowerCase().includes(q);
+          m.league.toLowerCase().includes(q) ||
+          (m.markets && m.markets.some(mk => mk.choices.some(c => c.label.toLowerCase().includes(q))));
         if (!matchesQuery) return false;
       }
 
@@ -516,11 +816,20 @@ export default function App() {
       {/* Header */}
       <Header
         wallet={wallet}
+        currentUser={currentUser}
         liveMatchesCount={liveCount}
         onOpenDeposit={() => setIsDepositOpen(true)}
         onOpenWithdraw={() => setIsWithdrawOpen(true)}
         onOpenApiModal={() => setIsApiModalOpen(true)}
         onOpenHistory={() => setIsHistoryOpen(true)}
+        onOpenAuth={(mode) => {
+          setAuthInitialMode(mode);
+          setIsAuthOpen(true);
+        }}
+        onOpenDashboard={() => setIsDashboardOpen(true)}
+        onOpenAdminPanel={() => setIsAdminPanelOpen(true)}
+        onLogout={handleLogout}
+        pendingDepositsCount={pendingDepositsCount}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         activeSportFilter={selectedSport}
@@ -550,7 +859,7 @@ export default function App() {
         {/* Center Main: Live Pitch Tracker + Match Cards */}
         <div className="flex-1 w-full min-w-0 flex flex-col">
           {/* Active Live Match Tracker Showcase (If there's an active live match) */}
-          {activeTrackerMatch && (
+          {activeTrackerMatch && activeTrackerMatch.sport !== 'politics' && (
             <LivePitchTracker match={activeTrackerMatch} />
           )}
 
@@ -589,7 +898,7 @@ export default function App() {
           <div className="flex items-center gap-2 text-slate-400">
             <span className="font-extrabold text-white">BET<span className="text-[#00e701]">ESPORTE</span> PRO</span>
             <span>·</span>
-            <span>Sistema Oficial de Apostas Esportivas</span>
+            <span>Sistema Oficial de Apostas Esportivas & Políticas</span>
           </div>
 
           <div className="flex items-center gap-4 text-[11px] text-slate-400">
@@ -614,14 +923,18 @@ export default function App() {
       <DepositModal
         isOpen={isDepositOpen}
         onClose={() => setIsDepositOpen(false)}
+        currentUser={currentUser}
         onDepositSuccess={handleDepositSuccess}
+        onRequestDepositApproval={handleQueueDepositRequest}
       />
 
       <WithdrawModal
         isOpen={isWithdrawOpen}
         onClose={() => setIsWithdrawOpen(false)}
         wallet={wallet}
+        currentUser={currentUser}
         onWithdrawSuccess={handleWithdrawSuccess}
+        onRequestWithdrawApproval={handleQueueWithdrawRequest}
       />
 
       <TransactionHistoryModal
@@ -644,6 +957,51 @@ export default function App() {
         onForceOddsJitter={handleForceOddsJitter}
         isEngineRunning={isEngineRunning}
         onToggleEngine={() => setIsEngineRunning(!isEngineRunning)}
+      />
+
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        users={users}
+        onLogin={handleLogin}
+        onRegister={handleRegister}
+        initialMode={authInitialMode}
+      />
+
+      <UserDashboardModal
+        isOpen={isDashboardOpen}
+        onClose={() => setIsDashboardOpen(false)}
+        user={currentUser}
+        onUpdateLimit={handleUserUpdateLimit}
+        onOpenDeposit={() => {
+          setIsDashboardOpen(false);
+          setIsDepositOpen(true);
+        }}
+        onOpenWithdraw={() => {
+          setIsDashboardOpen(false);
+          setIsWithdrawOpen(true);
+        }}
+        onOpenHistory={() => {
+          setIsDashboardOpen(false);
+          setIsHistoryOpen(true);
+        }}
+        onLogout={handleLogout}
+      />
+
+      <AdminPanelModal
+        isOpen={isAdminPanelOpen}
+        onClose={() => setIsAdminPanelOpen(false)}
+        users={users}
+        depositRequests={depositRequests}
+        withdrawRequests={withdrawRequests}
+        houseSettings={houseSettings}
+        onApproveDeposit={handleApproveDeposit}
+        onRejectDeposit={handleRejectDeposit}
+        onApproveWithdraw={handleApproveWithdraw}
+        onRejectWithdraw={handleRejectWithdraw}
+        onToggleUserStatus={handleToggleUserStatus}
+        onManualCreditUser={handleManualCreditUser}
+        onSaveHouseSettings={handleSaveHouseSettings}
       />
     </div>
   );
