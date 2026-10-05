@@ -18,7 +18,9 @@ import {
   Shield,
   LogOut,
   Sliders,
-  Sparkles
+  Sparkles,
+  RefreshCw,
+  Database
 } from 'lucide-react';
 import { UserWallet } from '../types/betting';
 import { UserAccount } from '../types/auth';
@@ -44,6 +46,10 @@ interface HeaderProps {
   onOddsFormatChange: (f: 'decimal' | 'fractional' | 'american') => void;
   autoAcceptOdds: boolean;
   onToggleAutoAcceptOdds: () => void;
+  isSyncing?: boolean;
+  lastSyncTime?: string;
+  onTriggerSync?: () => void;
+  onOpenElectionOfficial?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -67,6 +73,10 @@ export const Header: React.FC<HeaderProps> = ({
   onOddsFormatChange,
   autoAcceptOdds,
   onToggleAutoAcceptOdds,
+  isSyncing = false,
+  lastSyncTime = 'Agora',
+  onTriggerSync,
+  onOpenElectionOfficial,
 }) => {
   const [showBalance, setShowBalance] = useState(true);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
@@ -124,9 +134,36 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* User Balance, Admin Panel, Actions & Auth */}
+        {/* User Balance, Admin Panel, Database Sync & Auth */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Admin Panel Quick Access Button (Always accessible or prominent if admin) */}
+          {/* Official TSE Anti-Fake News Badge Button */}
+          {onOpenElectionOfficial && (
+            <button
+              onClick={onOpenElectionOfficial}
+              className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-950/40 border border-emerald-500/40 hover:bg-emerald-900/40 text-emerald-300 text-xs font-semibold transition-colors cursor-pointer"
+              title="Ver dados oficiais registrados no TSE e checagem anti-fake news"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-[#00e701]" />
+              <span>Dados TSE Oficiais</span>
+            </button>
+          )}
+
+          {/* Database Sync Button */}
+          {onTriggerSync && (
+            <button
+              onClick={onTriggerSync}
+              disabled={isSyncing}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-[#00e701]/60 text-slate-200 text-xs font-semibold transition-colors cursor-pointer"
+              title={`Sincronizar dados em tempo real com o banco de dados oficial (Última sincronização: ${lastSyncTime})`}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-[#00e701] ${isSyncing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">
+                {isSyncing ? 'Sincronizando...' : 'Sync API'}
+              </span>
+            </button>
+          )}
+
+          {/* Admin Panel Quick Access Button */}
           <button
             onClick={onOpenAdminPanel}
             className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer ${

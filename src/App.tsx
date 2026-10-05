@@ -58,6 +58,15 @@ import { ApiSimulatorModal } from './components/ApiSimulatorModal';
 import { AuthModal } from './components/AuthModal';
 import { UserDashboardModal } from './components/UserDashboardModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
+import { ElectionOfficialModal } from './components/ElectionOfficialModal';
+import { ShieldCheck } from 'lucide-react';
+import { 
+  fetchMatchesFromApi, 
+  triggerDatabaseSync, 
+  fetchOfficialElectionData, 
+  fetchHealth 
+} from './services/apiSyncService';
+import { OFFICIAL_ELECTION_INITIAL, OfficialElectionData } from './types/election';
 
 const INITIAL_TICKETS: BetTicket[] = [
   {
@@ -166,6 +175,38 @@ export default function App() {
   const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register'>('login');
   const [isDashboardOpen, setIsDashboardOpen] = useState<boolean>(false);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState<boolean>(false);
+
+  // Database Sync & Official TSE Election Modal
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string>('Agora');
+  const [isElectionModalOpen, setIsElectionModalOpen] = useState<boolean>(false);
+  const [officialElectionData, setOfficialElectionData] = useState<OfficialElectionData>(OFFICIAL_ELECTION_INITIAL);
+
+  // On mount: fetch database state and official election data from server API
+  useEffect(() => {
+    fetchMatchesFromApi().then((serverMatches) => {
+      if (serverMatches && serverMatches.length > 0) {
+        setMatches(serverMatches);
+      }
+    });
+
+    fetchOfficialElectionData().then((electData) => {
+      if (electData) {
+        setOfficialElectionData(electData);
+      }
+    });
+  }, []);
+
+  const handleTriggerSync = async () => {
+    setIsSyncing(true);
+    playSoundEffect('click');
+    const res = await triggerDatabaseSync();
+    if (res.matches && res.matches.length > 0) {
+      setMatches(res.matches);
+    }
+    setLastSyncTime(res.timestamp);
+    setIsSyncing(false);
+  };
 
   // Save tickets to localStorage
   useEffect(() => {
@@ -841,6 +882,10 @@ export default function App() {
         onOddsFormatChange={setOddsFormat}
         autoAcceptOdds={autoAcceptOdds}
         onToggleAutoAcceptOdds={() => setAutoAcceptOdds(!autoAcceptOdds)}
+        isSyncing={isSyncing}
+        lastSyncTime={lastSyncTime}
+        onTriggerSync={handleTriggerSync}
+        onOpenElectionOfficial={() => setIsElectionModalOpen(true)}
       />
 
       {/* Main Layout Container */}
@@ -858,6 +903,36 @@ export default function App() {
 
         {/* Center Main: Live Pitch Tracker + Match Cards */}
         <div className="flex-1 w-full min-w-0 flex flex-col">
+          {/* Official TSE Banner when viewing Presidential Politics */}
+          {selectedSport === 'politics' && (
+            <div className="mb-4 bg-gradient-to-r from-emerald-950/70 via-[#102419] to-emerald-950/70 border border-emerald-500/50 rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#00e701]/20 border border-[#00e701]/40 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-5 h-5 text-[#00e701]" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs sm:text-sm font-extrabold text-white">
+                      Eleições 2026: Dados Oficiais TSE & Pesquisas Registradas
+                    </span>
+                    <span className="text-[10px] bg-emerald-500/20 text-[#00e701] font-bold px-1.5 py-0.2 rounded border border-emerald-500/40">
+                      ANTI-FAKE NEWS
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 mt-0.5">
+                    Cotações fundamentadas no calendário eleitoral oficial e pesquisas auditadas (Datafolha / Quaest) com registro TSE.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsElectionModalOpen(true)}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs whitespace-nowrap cursor-pointer transition-colors shadow-sm"
+              >
+                Ver Auditoria e Metodologia TSE
+              </button>
+            </div>
+          )}
+
           {/* Active Live Match Tracker Showcase (If there's an active live match) */}
           {activeTrackerMatch && activeTrackerMatch.sport !== 'politics' && (
             <LivePitchTracker match={activeTrackerMatch} />
@@ -1002,6 +1077,16 @@ export default function App() {
         onToggleUserStatus={handleToggleUserStatus}
         onManualCreditUser={handleManualCreditUser}
         onSaveHouseSettings={handleSaveHouseSettings}
+      />
+
+      <ElectionOfficialModal
+        isOpen={isElectionModalOpen}
+        onClose={() => setIsElectionModalOpen(false)}
+        data={officialElectionData}
+        onGoToBetting={() => {
+          setSelectedSport('politics');
+          setSelectedLeague('all');
+        }}
       />
     </div>
   );
