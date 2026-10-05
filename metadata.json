@@ -1,0 +1,8 @@
+{
+  "name": "BetEsporte Pro - Apostas Esportivas & Painel em Tempo Real",
+  "description": "Plataforma completa de apostas esportivas estilo BetEsporte com cotações dinâmicas em tempo real, painel de estatísticas ao vivo, boletim de apostas e pagamentos instantâneos via PIX.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
