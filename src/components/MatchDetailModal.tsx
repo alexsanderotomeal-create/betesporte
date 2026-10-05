@@ -45,11 +45,18 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
         {/* Header */}
         <div className="bg-[#161b22] px-4 py-3 border-b border-[#21262d] flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-sm">🏆</span>
+            <span className="text-base">{match.sport === 'politics' ? '🗳️' : '🏆'}</span>
             <div className="flex flex-col">
-              <span className="text-xs sm:text-sm font-bold text-white">
-                {match.homeTeam} vs {match.awayTeam}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs sm:text-sm font-bold text-white">
+                  {match.homeTeam} {match.sport === 'politics' ? '·' : 'vs'} {match.awayTeam}
+                </span>
+                {match.sport === 'politics' && (
+                  <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-[#00e701] text-[10px] font-extrabold uppercase border border-emerald-500/40">
+                    Auditado TSE
+                  </span>
+                )}
+              </div>
               <span className="text-[11px] text-slate-400">
                 {match.league} · {match.country}
               </span>
@@ -57,7 +64,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {match.status === 'LIVE' && (
+            {match.status === 'LIVE' && match.sport !== 'politics' && (
               <span className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-rose-600/20 text-rose-400 text-xs font-mono font-bold">
                 <Radio className="w-3 h-3 animate-pulse text-rose-500" />
                 {match.minute}' AO VIVO
@@ -74,8 +81,8 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
 
         {/* Scrollable Body */}
         <div className="overflow-y-auto p-4 flex flex-col gap-4 flex-1">
-          {/* Live Pitch Tracker Embedded (If Live) */}
-          {match.status === 'LIVE' && (
+          {/* Live Pitch Tracker Embedded (If Live soccer/tennis) */}
+          {match.status === 'LIVE' && match.sport !== 'politics' && (
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
@@ -94,14 +101,22 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
 
           {/* Market Filter Categories */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none border-b border-[#21262d]">
-            {[
-              { id: 'all', label: 'Todos os Mercados' },
-              { id: 'main', label: 'Principais' },
-              { id: 'goals', label: 'Gols / Pontos' },
-              { id: 'handicap', label: 'Handicap' },
-              { id: 'specials', label: 'Especiais / Placar' },
-              { id: 'corners', label: 'Escanteios' },
-            ].map((cat) => (
+            {(match.sport === 'politics'
+              ? [
+                  { id: 'all', label: 'Todos os Mercados' },
+                  { id: 'main', label: 'Candidatos & Partidos' },
+                  { id: 'specials', label: '1º e 2º Turnos' },
+                  { id: 'goals', label: 'Margem de Votos' },
+                ]
+              : [
+                  { id: 'all', label: 'Todos os Mercados' },
+                  { id: 'main', label: 'Principais' },
+                  { id: 'goals', label: 'Gols / Pontos' },
+                  { id: 'handicap', label: 'Handicap' },
+                  { id: 'specials', label: 'Especiais / Placar' },
+                  { id: 'corners', label: 'Escanteios' },
+                ]
+            ).map((cat) => (
               <button
                 key={cat.id}
                 onClick={() => setActiveCategory(cat.id)}

@@ -36,6 +36,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [successMessage, setSuccessMessage] = useState<string>('');
 
+  React.useEffect(() => {
+    setMode(initialMode);
+    setErrorMessage('');
+    setSuccessMessage('');
+  }, [initialMode, isOpen]);
+
   // Login form state
   const [loginIdentifier, setLoginIdentifier] = useState<string>('');
   const [loginPassword, setLoginPassword] = useState<string>('');
@@ -81,8 +87,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     onClose();
   };
 
-  const handleQuickLogin = (role: 'admin' | 'user') => {
-    const target = users.find((u) => u.role === role);
+  const handleQuickLoginUser = (identifier: string) => {
+    const target = users.find(
+      (u) =>
+        u.email.toLowerCase() === identifier.toLowerCase() ||
+        u.role === identifier ||
+        u.name.toLowerCase().includes(identifier.toLowerCase())
+    );
     if (target) {
       onLogin(target);
       onClose();
@@ -132,6 +143,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       dailyDepositLimit: 5000,
       createdAt: 'Hoje',
     };
+
+    fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: regName.trim(),
+        email: cleanEmail,
+        cpf: regCpf.trim(),
+        phone: regPhone.trim(),
+        password: regPassword,
+      }),
+    }).catch(() => {});
 
     onRegister(newUser);
     setSuccessMessage('Cadastro realizado com sucesso! Bônus de R$ 100 concedido.');
@@ -244,22 +267,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               {/* Quick Login Test Sandbox Buttons */}
               <div className="pt-3 border-t border-[#21262d] flex flex-col gap-2">
                 <span className="text-[11px] text-slate-400 text-center font-medium">
-                  ⚡ Acesso Rápido para Demonstração:
+                  ⚡ Entrar com Conta de Demonstração em 1 Clique:
                 </span>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <button
                     type="button"
-                    onClick={() => handleQuickLogin('admin')}
-                    className="py-1.5 px-2 rounded-lg bg-[#21262d] hover:bg-[#30363d] border border-amber-500/40 text-amber-300 text-xs font-bold transition-colors text-center"
+                    onClick={() => handleQuickLoginUser('alexsander@primasbet.br')}
+                    className="py-1.5 px-2 rounded-lg bg-[#21262d] hover:bg-[#30363d] border border-[#00e701]/40 text-[#00e701] text-[11px] font-bold transition-colors text-center"
+                    title="Entrar como Alexsander Otomeal (R$ 250 Saldo)"
                   >
-                    🛡️ Login Admin
+                    👤 Alexsander
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleQuickLogin('user')}
-                    className="py-1.5 px-2 rounded-lg bg-[#21262d] hover:bg-[#30363d] border border-[#00e701]/40 text-[#00e701] text-xs font-bold transition-colors text-center"
+                    onClick={() => handleQuickLoginUser('marcos.apostador@gmail.com')}
+                    className="py-1.5 px-2 rounded-lg bg-[#21262d] hover:bg-[#30363d] border border-blue-500/40 text-blue-300 text-[11px] font-bold transition-colors text-center"
+                    title="Entrar como Marcos Vinicius (R$ 120 Saldo)"
                   >
-                    👤 Login Apostador
+                    👤 Marcos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLoginUser('admin@primasbet.br')}
+                    className="py-1.5 px-2 rounded-lg bg-[#21262d] hover:bg-[#30363d] border border-amber-500/40 text-amber-300 text-[11px] font-bold transition-colors text-center"
+                    title="Entrar como Gestão Administrativa (Backoffice Master)"
+                  >
+                    🛡️ Admin Master
                   </button>
                 </div>
               </div>

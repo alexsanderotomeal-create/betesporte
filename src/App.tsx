@@ -64,7 +64,11 @@ import {
   fetchMatchesFromApi, 
   triggerDatabaseSync, 
   fetchOfficialElectionData, 
-  fetchHealth 
+  fetchHealth,
+  serverApproveDeposit,
+  serverRejectDeposit,
+  serverApproveWithdraw,
+  serverRejectWithdraw
 } from './services/apiSyncService';
 import { OFFICIAL_ELECTION_INITIAL, OfficialElectionData } from './types/election';
 
@@ -147,7 +151,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(loadCurrentUser);
   const [wallet, setWallet] = useState<UserWallet>(() => {
     const user = loadCurrentUser();
-    return user ? user.wallet : loadWallet();
+    return user ? user.wallet : { realBalance: 0, bonusBalance: 0, currency: 'BRL' };
   });
   const [depositRequests, setDepositRequests] = useState<DepositRequest[]>(loadDepositRequests);
   const [withdrawRequests, setWithdrawRequests] = useState<WithdrawRequest[]>(loadWithdrawRequests);
@@ -195,6 +199,18 @@ export default function App() {
         setOfficialElectionData(electData);
       }
     });
+
+    // Periodic auto-sync with database API every 25 seconds
+    const syncTimer = setInterval(() => {
+      triggerDatabaseSync().then((res) => {
+        if (res.matches && res.matches.length > 0) {
+          setMatches(res.matches);
+        }
+        setLastSyncTime(res.timestamp);
+      });
+    }, 25000);
+
+    return () => clearInterval(syncTimer);
   }, []);
 
   const handleTriggerSync = async () => {
@@ -567,6 +583,7 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     saveCurrentUser(null);
+    setWallet({ realBalance: 0, bonusBalance: 0, currency: 'BRL' });
   };
 
   const handleUserUpdateLimit = (newLimit: number) => {
@@ -600,6 +617,7 @@ export default function App() {
     );
     setDepositRequests(updatedReqs);
     saveDepositRequests(updatedReqs);
+    serverApproveDeposit(requestId);
 
     // Credit target user
     setUsers((prevUsers) => {
@@ -654,6 +672,7 @@ export default function App() {
     );
     setDepositRequests(updatedReqs);
     saveDepositRequests(updatedReqs);
+    serverRejectDeposit(requestId);
   };
 
   const handleApproveWithdraw = (requestId: string) => {
@@ -670,6 +689,7 @@ export default function App() {
     );
     setWithdrawRequests(updatedReqs);
     saveWithdrawRequests(updatedReqs);
+    serverApproveWithdraw(requestId);
   };
 
   const handleRejectWithdraw = (requestId: string) => {
@@ -688,6 +708,7 @@ export default function App() {
     );
     setWithdrawRequests(updatedReqs);
     saveWithdrawRequests(updatedReqs);
+    serverRejectWithdraw(requestId);
 
     // Refund target user
     setUsers((prevUsers) => {
@@ -961,9 +982,21 @@ export default function App() {
           onPlaceBet={handlePlaceBet}
           tickets={tickets}
           onCashOut={handleCashOut}
-          onOpenDeposit={() => setIsDepositOpen(true)}
+          onOpenDeposit={() => {
+            if (!currentUser) {
+              setAuthInitialMode('login');
+              setIsAuthOpen(true);
+            } else {
+              setIsDepositOpen(true);
+            }
+          }}
           isMobileOpen={isMobileSlipOpen}
           onToggleMobile={() => setIsMobileSlipOpen(!isMobileSlipOpen)}
+          currentUser={currentUser}
+          onOpenAuth={(mode) => {
+            setAuthInitialMode(mode);
+            setIsAuthOpen(true);
+          }}
         />
       </main>
 

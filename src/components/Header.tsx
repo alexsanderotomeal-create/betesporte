@@ -196,139 +196,161 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="hidden xl:inline font-medium">API Feed</span>
           </button>
 
-          {/* User Wallet Balance Box */}
-          <div className="flex items-center bg-[#161b22] border border-[#30363d] rounded-lg px-2 sm:px-3 py-1.5 gap-2">
-            <div className="flex flex-col text-right">
-              <div className="flex items-center justify-end gap-1.5">
-                <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">
-                  Saldo Real
-                </span>
-                <button
-                  onClick={() => setShowBalance(!showBalance)}
-                  className="text-slate-400 hover:text-white"
-                  title={showBalance ? "Ocultar Saldo" : "Mostrar Saldo"}
-                >
-                  {showBalance ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                </button>
-              </div>
-              <div className="font-mono text-xs sm:text-sm font-bold text-[#00e701] leading-tight">
-                {showBalance ? formatCurrency(wallet.realBalance) : '••••••'}
-              </div>
-              {wallet.bonusBalance > 0 && showBalance && (
-                <div className="text-[10px] text-amber-400 font-mono leading-none mt-0.5">
-                  + {formatCurrency(wallet.bonusBalance)} Bônus
-                </div>
-              )}
-            </div>
-
-            <div className="hidden sm:block w-[1px] h-6 bg-[#30363d] mx-1"></div>
-
-            {/* Quick Deposit & Withdraw Buttons */}
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={onOpenDeposit}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-[#00e701] hover:bg-[#00c901] active:bg-[#00aa01] text-black font-bold text-xs uppercase tracking-wide transition-all shadow-sm shadow-[#00e701]/20 cursor-pointer"
-              >
-                <ArrowDownLeft className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span className="hidden sm:inline">Depositar</span>
-                <span className="sm:hidden">PIX</span>
-              </button>
-
-              <button
-                onClick={onOpenWithdraw}
-                className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-[#21262d] hover:bg-[#30363d] text-slate-200 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
-                title="Sacar via PIX"
-              >
-                <ArrowUpRight className="w-3.5 h-3.5 text-slate-400" />
-                <span>Sacar</span>
-              </button>
-            </div>
-          </div>
-
-          {/* User Auth / Profile Dropdown */}
+          {/* User Logged In: Wallet Balance & Profile / Dashboard */}
           {currentUser ? (
-            <div className="relative">
+            <>
+              {/* Wallet Balance Box */}
+              <div className="flex items-center bg-[#161b22] border border-[#30363d] rounded-lg px-2 sm:px-3 py-1.5 gap-2">
+                <div className="flex flex-col text-right">
+                  <div className="flex items-center justify-end gap-1.5">
+                    <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">
+                      Saldo Real
+                    </span>
+                    <button
+                      onClick={() => setShowBalance(!showBalance)}
+                      className="text-slate-400 hover:text-white"
+                      title={showBalance ? "Ocultar Saldo" : "Mostrar Saldo"}
+                    >
+                      {showBalance ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                    </button>
+                  </div>
+                  <div className="font-mono text-xs sm:text-sm font-bold text-[#00e701] leading-tight">
+                    {showBalance ? formatCurrency(wallet.realBalance) : '••••••'}
+                  </div>
+                  {wallet.bonusBalance > 0 && showBalance && (
+                    <div className="text-[10px] text-amber-400 font-mono leading-none mt-0.5">
+                      + {formatCurrency(wallet.bonusBalance)} Bônus
+                    </div>
+                  )}
+                </div>
+
+                <div className="hidden sm:block w-[1px] h-6 bg-[#30363d] mx-1"></div>
+
+                {/* Quick Deposit & Withdraw Buttons */}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={onOpenDeposit}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-[#00e701] hover:bg-[#00c901] active:bg-[#00aa01] text-black font-bold text-xs uppercase tracking-wide transition-all shadow-sm shadow-[#00e701]/20 cursor-pointer"
+                  >
+                    <ArrowDownLeft className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <span className="hidden sm:inline">Depositar</span>
+                    <span className="sm:hidden">PIX</span>
+                  </button>
+
+                  <button
+                    onClick={onOpenWithdraw}
+                    className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-[#21262d] hover:bg-[#30363d] text-slate-200 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
+                    title="Sacar via PIX"
+                  >
+                    <ArrowUpRight className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Sacar</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Direct 'Meu Perfil' Dashboard Button */}
               <button
-                onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                className="flex items-center gap-2 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-slate-500 text-slate-200 transition-colors"
+                onClick={onOpenDashboard}
+                className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] hover:border-[#00e701]/50 text-slate-200 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
+                title="Acessar Perfil, Limites e Dashboard do Usuário"
               >
-                <div className="w-6 h-6 rounded-full bg-[#00e701]/20 border border-[#00e701]/40 flex items-center justify-center text-[#00e701] font-bold text-xs">
-                  {currentUser.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="hidden md:flex flex-col text-left">
-                  <span className="text-xs font-bold text-white truncate max-w-[100px] leading-tight">
-                    {currentUser.name.split(' ')[0]}
-                  </span>
-                  <span className="text-[9px] text-[#00e701] uppercase font-semibold">
-                    {currentUser.role === 'admin' ? 'Admin' : 'Apostador'}
-                  </span>
-                </div>
+                <User className="w-3.5 h-3.5 text-[#00e701]" />
+                <span>Meu Perfil</span>
               </button>
 
-              {userDropdownOpen && (
-                <div 
-                  className="absolute right-0 mt-2 w-56 bg-[#161b22] border border-[#30363d] rounded-xl shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
-                  onClick={() => setUserDropdownOpen(false)}
+              {/* User Avatar Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+                  className="flex items-center gap-2 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-slate-500 text-slate-200 transition-colors"
                 >
-                  <div className="px-3 py-2 border-b border-[#21262d]">
-                    <div className="text-xs font-bold text-white truncate">{currentUser.name}</div>
-                    <div className="text-[11px] text-slate-400 truncate">{currentUser.email}</div>
-                    <div className="text-[10px] text-emerald-400 font-semibold mt-0.5">
-                      CPF: {currentUser.cpf}
+                  <div className="w-6 h-6 rounded-full bg-[#00e701]/20 border border-[#00e701]/40 flex items-center justify-center text-[#00e701] font-bold text-xs">
+                    {currentUser.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="hidden md:flex flex-col text-left">
+                    <span className="text-xs font-bold text-white truncate max-w-[100px] leading-tight">
+                      {currentUser.name.split(' ')[0]}
+                    </span>
+                    <span className="text-[9px] text-[#00e701] uppercase font-semibold">
+                      {currentUser.role === 'admin' ? 'Admin' : 'Apostador'}
+                    </span>
+                  </div>
+                </button>
+
+                {userDropdownOpen && (
+                  <div 
+                    className="absolute right-0 mt-2 w-56 bg-[#161b22] border border-[#30363d] rounded-xl shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                    onClick={() => setUserDropdownOpen(false)}
+                  >
+                    <div className="px-3 py-2 border-b border-[#21262d]">
+                      <div className="text-xs font-bold text-white truncate">{currentUser.name}</div>
+                      <div className="text-[11px] text-slate-400 truncate">{currentUser.email}</div>
+                      <div className="text-[10px] text-emerald-400 font-semibold mt-0.5">
+                        CPF: {currentUser.cpf}
+                      </div>
+                    </div>
+
+                    <div className="py-1">
+                      <button
+                        onClick={onOpenDashboard}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-200 hover:bg-[#21262d] rounded-lg transition-colors text-left"
+                      >
+                        <User className="w-3.5 h-3.5 text-[#00e701]" />
+                        <span>Meu Perfil & Limites</span>
+                      </button>
+
+                      <button
+                        onClick={onOpenHistory}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-200 hover:bg-[#21262d] rounded-lg transition-colors text-left"
+                      >
+                        <History className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Extrato & Transações PIX</span>
+                      </button>
+
+                      {currentUser.role === 'admin' && (
+                        <button
+                          onClick={onOpenAdminPanel}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-amber-300 hover:bg-[#21262d] rounded-lg transition-colors text-left font-semibold"
+                        >
+                          <Shield className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Painel de Gestão Admin</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="border-t border-[#21262d] pt-1">
+                      <button
+                        onClick={onLogout}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors text-left"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Encerrar Sessão</span>
+                      </button>
                     </div>
                   </div>
-
-                  <div className="py-1">
-                    <button
-                      onClick={onOpenDashboard}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-200 hover:bg-[#21262d] rounded-lg transition-colors text-left"
-                    >
-                      <User className="w-3.5 h-3.5 text-[#00e701]" />
-                      <span>Meu Painel & Limites</span>
-                    </button>
-
-                    <button
-                      onClick={onOpenHistory}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-200 hover:bg-[#21262d] rounded-lg transition-colors text-left"
-                    >
-                      <History className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Extrato & Transações PIX</span>
-                    </button>
-
-                    <button
-                      onClick={onOpenAdminPanel}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-amber-300 hover:bg-[#21262d] rounded-lg transition-colors text-left font-semibold"
-                    >
-                      <Shield className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Painel de Gestão Admin</span>
-                    </button>
-                  </div>
-
-                  <div className="border-t border-[#21262d] pt-1">
-                    <button
-                      onClick={onLogout}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors text-left"
-                    >
-                      <LogOut className="w-3.5 h-3.5" />
-                      <span>Encerrar Sessão</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            </>
           ) : (
-            <div className="flex items-center gap-1.5">
+            /* User NOT Logged In: Prominent Entrar & Cadastre-se Buttons */
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => onOpenAuth('login')}
-                className="px-3 py-1.5 rounded-lg bg-[#21262d] hover:bg-[#30363d] text-slate-200 text-xs font-bold transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] hover:border-slate-400 text-slate-200 hover:text-white text-xs font-bold transition-all cursor-pointer shadow-sm"
               >
-                Entrar
+                <User className="w-3.5 h-3.5 text-slate-400" />
+                <span>Entrar</span>
               </button>
+
               <button
                 onClick={() => onOpenAuth('register')}
-                className="px-3 py-1.5 rounded-lg bg-[#00e701] hover:bg-[#00c901] text-black text-xs font-extrabold uppercase transition-all shadow-sm cursor-pointer"
+                className="flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-xl bg-[#00e701] hover:bg-[#00c901] active:bg-[#00aa01] text-black text-xs font-extrabold uppercase tracking-wide transition-all shadow-md shadow-[#00e701]/25 cursor-pointer"
               >
-                Cadastrar
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Cadastre-se</span>
+                <span className="hidden sm:inline bg-black/20 text-black px-1.5 py-0.5 rounded text-[9px] font-black">
+                  +R$ 150 BÔNUS
+                </span>
               </button>
             </div>
           )}

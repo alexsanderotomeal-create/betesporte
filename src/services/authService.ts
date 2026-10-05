@@ -143,8 +143,8 @@ export const loadCurrentUser = (): UserAccount | null => {
   } catch {
     // fallback
   }
-  // Default logged in user is Alexsander so the app works seamlessly out of the box
-  return INITIAL_USERS[1];
+  // Default is null (logged out) so guest can register or login
+  return null;
 };
 
 export const saveCurrentUser = (user: UserAccount | null): void => {

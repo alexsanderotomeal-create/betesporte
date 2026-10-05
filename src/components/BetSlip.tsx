@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { BetSelection, BetTicket, UserWallet } from '../types/betting';
+import { UserAccount } from '../types/auth';
 import { playSoundEffect } from '../services/sportsEngine';
 
 interface BetSlipProps {
@@ -29,6 +30,8 @@ interface BetSlipProps {
   onOpenDeposit: () => void;
   isMobileOpen: boolean;
   onToggleMobile: () => void;
+  currentUser?: UserAccount | null;
+  onOpenAuth?: (mode: 'login' | 'register') => void;
 }
 
 export const BetSlip: React.FC<BetSlipProps> = ({
@@ -44,6 +47,8 @@ export const BetSlip: React.FC<BetSlipProps> = ({
   onOpenDeposit,
   isMobileOpen,
   onToggleMobile,
+  currentUser,
+  onOpenAuth,
 }) => {
   const [activeTab, setActiveTab] = useState<'slip' | 'my_bets'>('slip');
   const [betType, setBetType] = useState<'single' | 'multiple'>('multiple');
@@ -351,29 +356,39 @@ export const BetSlip: React.FC<BetSlipProps> = ({
                 </div>
 
                 {/* Submit Bet Button */}
-                <button
-                  disabled={hasSuspendedSelections}
-                  onClick={handleFinalizeBet}
-                  className={`w-full py-3 px-4 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer ${
-                    hasSuspendedSelections
-                      ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                      : isInsufficientBalance
-                      ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-amber-500/20'
-                      : 'bg-[#00e701] hover:bg-[#00c901] active:scale-[0.99] text-black shadow-[#00e701]/30'
-                  }`}
-                >
-                  {isInsufficientBalance ? (
-                    <>
-                      <span>Saldo Insuficiente - Depositar PIX</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>Fazer Aposta</span>
-                    </>
-                  )}
-                </button>
+                {!currentUser ? (
+                  <button
+                    onClick={() => onOpenAuth && onOpenAuth('login')}
+                    className="w-full py-3 px-4 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 bg-[#00e701] hover:bg-[#00c901] active:scale-[0.99] text-black shadow-md shadow-[#00e701]/30 cursor-pointer"
+                  >
+                    <span>Entrar ou Cadastrar para Apostar</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <button
+                    disabled={hasSuspendedSelections}
+                    onClick={handleFinalizeBet}
+                    className={`w-full py-3 px-4 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer ${
+                      hasSuspendedSelections
+                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                        : isInsufficientBalance
+                        ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-amber-500/20'
+                        : 'bg-[#00e701] hover:bg-[#00c901] active:scale-[0.99] text-black shadow-[#00e701]/30'
+                    }`}
+                  >
+                    {isInsufficientBalance ? (
+                      <>
+                        <span>Saldo Insuficiente - Depositar PIX</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Fazer Aposta</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             )}
           </div>

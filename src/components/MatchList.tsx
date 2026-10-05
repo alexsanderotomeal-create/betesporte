@@ -204,10 +204,14 @@ export const MatchList: React.FC<MatchListProps> = ({
 
                       {/* Right: Odds Market Grid */}
                       <div className="flex items-center gap-2 flex-wrap xl:flex-nowrap">
-                        {/* 1X2 Market */}
+                        {/* Main Market (1X2 for soccer, Top Candidates for politics) */}
                         {mainMarket && (
-                          <div className="grid grid-cols-3 gap-1.5 w-full sm:w-64 shrink-0">
-                            {mainMarket.choices.map((choice) => (
+                          <div className={`grid gap-1.5 shrink-0 ${
+                            match.sport === 'politics'
+                              ? 'grid-cols-2 sm:grid-cols-4 w-full sm:w-80'
+                              : 'grid-cols-3 w-full sm:w-64'
+                          }`}>
+                            {(match.sport === 'politics' ? mainMarket.choices.slice(0, 4) : mainMarket.choices.slice(0, 3)).map((choice) => (
                               <OddButton
                                 key={choice.id}
                                 choice={choice}
