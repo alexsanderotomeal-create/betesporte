@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { INITIAL_MATCHES } from './data/mockMatches';
 import { 
   Match, 
@@ -22,28 +22,38 @@ import {
   toggleMarketSuspension, 
   playSoundEffect 
 } from './services/sportsEngine';
-import { 
-  loadWallet, 
-  saveWallet, 
-  loadTransactions, 
-  saveTransactions 
-} from './services/paymentService';
-import { 
-  loadApiConfig, 
-  saveApiConfig 
+import {
+  DEFAULT_API_CONFIG
 } from './services/sportsApi';
-import { 
-  loadUsers, 
-  saveUsers, 
-  loadCurrentUser, 
-  saveCurrentUser, 
-  loadDepositRequests, 
-  saveDepositRequests, 
-  loadWithdrawRequests, 
-  saveWithdrawRequests, 
-  loadHouseSettings, 
-  saveHouseSettings 
-} from './services/authService';
+import {
+  DEFAULT_HOUSE_SETTINGS,
+  createDepositRequest,
+  createWithdrawRequest,
+  fetchAllDeposits,
+  fetchAllProfiles,
+  fetchAllWithdrawals,
+  fetchAccount,
+  fetchDeposits,
+  fetchHouseSettings,
+  fetchTransactions,
+  fetchWithdrawals,
+  fetchLiveMatches,
+  fetchElectionContests,
+  syncMatchFeed,
+  placeBet,
+  placeElectionBet,
+} from './services/dataService';
+import { adminActions } from './services/adminService';
+import {
+  onAuthStateChange,
+  signOut as authSignOut,
+} from './services/auth';
+import { isSupabaseConfigured } from './lib/supabase';
+
+/** Extrai a mensagem util de um erro desconhecido, sem revelar stack no toast. */
+function toastMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
 
 import { Header } from './components/Header';
 import { SportsSidebar } from './components/SportsSidebar';
@@ -57,20 +67,10 @@ import { TransactionHistoryModal } from './components/TransactionHistoryModal';
 import { ApiSimulatorModal } from './components/ApiSimulatorModal';
 import { AuthModal } from './components/AuthModal';
 import { UserDashboardModal } from './components/UserDashboardModal';
-import { AdminPanelModal } from './components/AdminPanelModal';
+import { AdminPanelPage } from './components/AdminPanelPage';
 import { ElectionOfficialModal } from './components/ElectionOfficialModal';
 import { ShieldCheck } from 'lucide-react';
-import { 
-  fetchMatchesFromApi, 
-  triggerDatabaseSync, 
-  fetchOfficialElectionData, 
-  fetchHealth,
-  serverApproveDeposit,
-  serverRejectDeposit,
-  serverApproveWithdraw,
-  serverRejectWithdraw
-} from './services/apiSyncService';
-import { OFFICIAL_ELECTION_INITIAL, OfficialElectionData } from './types/election';
+import { ElectionContest } from './types/election';
 
 const INITIAL_TICKETS: BetTicket[] = [
   {
@@ -132,30 +132,29 @@ const INITIAL_TICKETS: BetTicket[] = [
 export default function App() {
   // Main sports & betting states
   const [matches, setMatches] = useState<Match[]>(INITIAL_MATCHES);
-  const [transactions, setTransactions] = useState<Transaction[]>(loadTransactions);
-  const [tickets, setTickets] = useState<BetTicket[]>(() => {
-    try {
-      const saved = localStorage.getItem('betesporte_tickets');
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return INITIAL_TICKETS;
-  });
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [tickets, setTickets] = useState<BetTicket[]>([]);
   const [selections, setSelections] = useState<BetSelection[]>([]);
-  const [apiConfig, setApiConfig] = useState<ApiConnectionConfig>(loadApiConfig);
+  const [apiConfig, setApiConfig] = useState<ApiConnectionConfig>(DEFAULT_API_CONFIG);
   const [isEngineRunning, setIsEngineRunning] = useState<boolean>(true);
 
-  // User Accounts & Authentication states
-  const [users, setUsers] = useState<UserAccount[]>(loadUsers);
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(loadCurrentUser);
-  const [wallet, setWallet] = useState<UserWallet>(() => {
-    const user = loadCurrentUser();
-    return user ? user.wallet : { realBalance: 0, bonusBalance: 0, currency: 'BRL' };
-  });
-  const [depositRequests, setDepositRequests] = useState<DepositRequest[]>(loadDepositRequests);
-  const [withdrawRequests, setWithdrawRequests] = useState<WithdrawRequest[]>(loadWithdrawRequests);
-  const [houseSettings, setHouseSettings] = useState<HouseSettings>(loadHouseSettings);
+  // Sessao e dados de conta. Sem sessao, tudo abaixo fica vazio — o modo
+  // visitante nao tem carteira, extrato nem pedidos.
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
+  const [wallet, setWallet] = useState<UserWallet>({ realBalance: 0, bonusBalance: 0, currency: 'BRL' });
+  const [users, setUsers] = useState<UserAccount[]>([]);
+  const [depositRequests, setDepositRequests] = useState<DepositRequest[]>([]);
+  const [withdrawRequests, setWithdrawRequests] = useState<WithdrawRequest[]>([]);
+  const [houseSettings, setHouseSettings] = useState<HouseSettings>(DEFAULT_HOUSE_SETTINGS);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // some sozinho, senao o aviso de erro fica na tela para sempre
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   // Filters & Settings
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -176,52 +175,134 @@ export default function App() {
 
   // Auth & Admin Modals
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
-  const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register'>('login');
+  const [authInitialMode, setAuthInitialMode] = useState<
+    'login' | 'register' | 'new-password'
+  >('login');
   const [isDashboardOpen, setIsDashboardOpen] = useState<boolean>(false);
-  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState<boolean>(false);
+  const [adminViewOpen, setAdminViewOpen] = useState<boolean>(false);
 
-  // Database Sync & Official TSE Election Modal
+  // Database Sync & Mercado Eleitoral
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [lastSyncTime, setLastSyncTime] = useState<string>('Agora');
   const [isElectionModalOpen, setIsElectionModalOpen] = useState<boolean>(false);
-  const [officialElectionData, setOfficialElectionData] = useState<OfficialElectionData>(OFFICIAL_ELECTION_INITIAL);
+  const [electionContests, setElectionContests] = useState<ElectionContest[]>([]);
+  const [isElectionSubmitting, setIsElectionSubmitting] = useState<boolean>(false);
+  const [electionError, setElectionError] = useState<string | null>(null);
 
-  // On mount: fetch database state and official election data from server API
+  /**
+ * Partidas vem do Supabase.
+ *
+ * As chamadas antigas apontavam para /api/matches num Express que nao existe mais
+ * (a Vercel hospeda so o front) e devolviam sucesso falso: qualquer falha caia
+ * num retorno silencioso. Quando a consulta falha, o app continua com
+ * INITIAL_MATCHES — o usuario ve a interface em vez de tela branca.
+ */
   useEffect(() => {
-    fetchMatchesFromApi().then((serverMatches) => {
-      if (serverMatches && serverMatches.length > 0) {
-        setMatches(serverMatches);
-      }
-    });
-
-    fetchOfficialElectionData().then((electData) => {
-      if (electData) {
-        setOfficialElectionData(electData);
-      }
-    });
-
-    // Periodic auto-sync with database API every 25 seconds
-    const syncTimer = setInterval(() => {
-      triggerDatabaseSync().then((res) => {
-        if (res.matches && res.matches.length > 0) {
-          setMatches(res.matches);
-        }
-        setLastSyncTime(res.timestamp);
+    fetchLiveMatches()
+      .then((live) => {
+        if (live.length > 0) setMatches(live);
+      })
+      .catch(() => {
+        // Sem partidas no banco (ou RLS fechada): mantem o estado inicial.
       });
-    }, 25000);
 
-    return () => clearInterval(syncTimer);
+    loadElectionContests();
   }, []);
+
+  /**
+   * Atualizacao periodica do feed real (ESPN) para usuarios autenticados.
+   *
+   * O Edge sync-sports tem trava de 45s; este loop de 2 min chama o feed e
+   * relê o catalogo do banco em silencio. Falha nao estoura toast: o botão
+   * manual no painel continua disponivel para quem quer ver o resultado.
+   */
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let cancelled = false;
+    const tick = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        await syncMatchFeed();
+        if (cancelled) return;
+        const live = await fetchLiveMatches();
+        if (!cancelled && live.length > 0) setMatches(live);
+      } catch {
+        // silencioso: round seguinte tenta de novo
+      }
+    };
+
+    const timer = window.setInterval(tick, 120_000);
+    tick();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(currentUser)]);
+
+  /**
+   * Mercados eleitorais (presidente e governador).
+   *
+   * Vem do banco como qualquer outro preco. Nao existe mais copia hardcoded com
+   * percentuais de "pesquisa": o operador ajusta a odd por la e o historico
+   * registra quem mexeu.
+   */
+  const loadElectionContests = useCallback(async () => {
+    try {
+      setElectionContests(await fetchElectionContests());
+    } catch {
+      // Sem prototyping cadastrado, ou migrations ainda nao aplicadas.
+      setElectionContests([]);
+    }
+  }, []);
+
+  const handlePlaceElectionBet = async (
+    contest: ElectionContest,
+    candidateId: string,
+    stake: number
+  ) => {
+    if (!currentUser) {
+      setAuthInitialMode('login');
+      setIsAuthOpen(true);
+      return;
+    }
+
+    setElectionError(null);
+    setIsElectionSubmitting(true);
+    try {
+      await placeElectionBet({ contestId: contest.id, candidateId, stake });
+    } catch (err) {
+      setElectionError(toastMessage(err, 'Nao foi possivel registrar a aposta.'));
+      return;
+    } finally {
+      setIsElectionSubmitting(false);
+    }
+
+    setToast('Aposta eleitoral registrada.');
+    setIsElectionModalOpen(false);
+    // Saldo e extrato sao relidos: o banco ja aplicou o debito.
+    if (currentUser) await loadAccountData(currentUser.id);
+  };
 
   const handleTriggerSync = async () => {
     setIsSyncing(true);
     playSoundEffect('click');
-    const res = await triggerDatabaseSync();
-    if (res.matches && res.matches.length > 0) {
-      setMatches(res.matches);
+    try {
+      // Primeiro alimenta o catalogo com o feed real (ESPN), depois rele o banco.
+      const feed = await syncMatchFeed();
+      const live = await fetchLiveMatches();
+      if (live.length > 0) setMatches(live);
+      if (feed.synced > 0) {
+        setToast(`${feed.synced} partida(s) sincronizada(s) do feed.`);
+      } else {
+        setToast('Partidas atualizadas.');
+      }
+    } catch {
+      setToast('Falha ao sincronizar partidas. Verifique a conexao.');
+    } finally {
+      setIsSyncing(false);
     }
-    setLastSyncTime(res.timestamp);
-    setIsSyncing(false);
   };
 
   // Save tickets to localStorage
@@ -245,31 +326,112 @@ export default function App() {
     return matches.filter((m) => m.status === 'LIVE').length;
   }, [matches]);
 
-  // Pending deposits count for admin badge
-  const pendingDepositsCount = useMemo(() => {
-    return depositRequests.filter((d) => d.status === 'PENDING').length;
-  }, [depositRequests]);
-
-  // Helper to persist user wallet updates across users state and currentUser
+  // Espelho da carteira entre o usuario logado e a lista de perfis.
+  // O saldo real esta no Supabase; aqui so mantem os dois estados coerentes
+  // para a interface nao piscar entre dois valores.
   const syncWalletToUser = (updatedWallet: UserWallet) => {
     setWallet(updatedWallet);
-    saveWallet(updatedWallet);
 
     if (currentUser) {
-      const updatedCurrent: UserAccount = {
-        ...currentUser,
-        wallet: updatedWallet,
-      };
+      const updatedCurrent: UserAccount = { ...currentUser, wallet: updatedWallet };
       setCurrentUser(updatedCurrent);
-      saveCurrentUser(updatedCurrent);
-
-      setUsers((prevUsers) => {
-        const nextUsers = prevUsers.map((u) => (u.id === currentUser.id ? updatedCurrent : u));
-        saveUsers(nextUsers);
-        return nextUsers;
-      });
+      setUsers((prevUsers) => prevUsers.map((u) => (u.id === currentUser.id ? updatedCurrent : u)));
     }
   };
+
+  /**
+   * Carrega tudo que depende da sessao. Chamar depois de login, logout e na
+   * montagem quando ja existe sessao.
+   */
+  const loadAccountData = useCallback(async (userId: string) => {
+    const account = await fetchAccount(userId);
+    if (!account) {
+      setCurrentUser(null);
+      return;
+    }
+
+    setCurrentUser(account);
+    setWallet(account.wallet);
+
+    const [txs, deps, wdrs] = await Promise.all([
+      fetchTransactions(userId),
+      fetchDeposits(userId),
+      fetchWithdrawals(userId),
+    ]);
+    setTransactions(txs);
+    setDepositRequests(deps);
+    setWithdrawRequests(wdrs);
+
+    // Lista de usuarios e fila global de pedidos so para admin. A RLS nega para
+    // role=user, entao nem tentamos no outro caso.
+    if (account.role === 'admin') {
+      try {
+        setUsers(await fetchAllProfiles());
+      } catch {
+        setUsers([]);
+      }
+      // Fila global so funciona para admin: a RLS e quem separa. Se um usuario
+      // comum chamar, devolve so o dele — entao nem precisamos tratar erro.
+      try {
+        setDepositRequests(await fetchAllDeposits());
+      } catch {
+        // fila global indisponivel: admin ve apenas os proprios pedidos
+      }
+      try {
+        setWithdrawRequests(await fetchAllWithdrawals());
+      } catch {
+        // idem
+      }
+    }
+  }, []);
+
+  // Sessao: Supabase Auth e a unica fonte de "quem sou eu".
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setIsAuthReady(true);
+      return;
+    }
+
+    let cancelled = false;
+
+    onAuthStateChange((event, session) => {
+      if (cancelled) return;
+
+      // Link de recuperacao validado: o GoTrue abre uma sessao especial onde a
+      // unica acao valida e gravar a nova senha (updateUser). Nao ha perfil
+      // completo ainda; abrimos o modal em modo rede de recuperacao.
+      if (event === 'PASSWORD_RECOVERY') {
+        setAuthInitialMode('new-password');
+        setIsAuthOpen(true);
+        setIsAuthReady(true);
+        return;
+      }
+
+      if (!session) {
+        setCurrentUser(null);
+        setWallet({ realBalance: 0, bonusBalance: 0, currency: 'BRL' });
+        setTransactions([]);
+        setUsers([]);
+        setDepositRequests([]);
+        setWithdrawRequests([]);
+        setIsAuthReady(true);
+        return;
+      }
+      void loadAccountData(session.user.id).finally(() => setIsAuthReady(true));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAccountData]);
+
+  // House settings sao publicas e independem de sessao.
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    fetchHouseSettings()
+      .then(setHouseSettings)
+      .catch(() => setHouseSettings(DEFAULT_HOUSE_SETTINGS));
+  }, []);
 
   // REAL-TIME ENGINE LOOP: Dynamic odds ticker and game minute advancements
   useEffect(() => {
@@ -418,387 +580,324 @@ export default function App() {
     );
   };
 
-  const handlePlaceBet = (
+  /**
+   * Coloca a aposta.
+   *
+   * O debito do saldo e a gravacao da aposta acontecem em `place_bet_atomic`, uma
+   * transacao unica no Postgres. Antes, este codigo subtraia o stake do saldo
+   * na tela e guardava a aposta em localStorage — o dinheiro sumia se a aba
+   * fechasse e o saldo confiava no cliente.
+   *
+   * Odd e payout sao o que o BANCO devolveu, nunca o que a tela calculou. O
+   * navegador so estima, para mostrar antes do clique; se a cotacao mexer no
+   * instante da aceitacao, vale o preco gravado na transacao.
+   */
+  const handlePlaceBet = async (
     stake: number,
     type: 'single' | 'multiple',
     currentSelections: BetSelection[]
-  ): boolean => {
+  ): Promise<boolean> => {
     if (!currentUser) {
       setAuthInitialMode('login');
       setIsAuthOpen(true);
       return false;
     }
+    if (currentSelections.length === 0) return false;
 
-    const totalBalance = wallet.realBalance + wallet.bonusBalance;
-    if (stake > totalBalance) return false;
-
-    // Deduct stake from wallet (real first, then bonus)
-    let newReal = wallet.realBalance;
-    let newBonus = wallet.bonusBalance;
-
-    if (newReal >= stake) {
-      newReal -= stake;
-    } else {
-      const diff = stake - newReal;
-      newReal = 0;
-      newBonus = Math.max(0, newBonus - diff);
+    let placed: Awaited<ReturnType<typeof placeBet>>;
+    try {
+      placed = await placeBet({
+        type,
+        selections: currentSelections,
+        stake,
+      });
+    } catch (err) {
+      setToast(toastMessage(err, 'Nao foi possivel registrar a aposta.'));
+      return false;
     }
-
-    const updatedWallet: UserWallet = {
-      ...wallet,
-      realBalance: Number(newReal.toFixed(2)),
-      bonusBalance: Number(newBonus.toFixed(2)),
-    };
-    syncWalletToUser(updatedWallet);
-
-    // Calculate total odd & potential return
-    const totalOdd = currentSelections.reduce((acc, s) => acc * s.odd, 1);
-    let bonusPercentage = 0;
-    if (currentSelections.length === 2) bonusPercentage = 5;
-    else if (currentSelections.length === 3) bonusPercentage = 10;
-    else if (currentSelections.length === 4) bonusPercentage = 15;
-    else if (currentSelections.length >= 5) bonusPercentage = 25;
-
-    const baseReturn = stake * totalOdd;
-    const bonusAmount = (baseReturn * bonusPercentage) / 100;
-    const potentialReturn = Number((baseReturn + bonusAmount).toFixed(2));
 
     const now = new Date();
     const dateStr = `Hoje, ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     const newTicket: BetTicket = {
-      id: `tkt-${Date.now()}`,
+      id: placed.betId,
       date: dateStr,
       type,
       selections: [...currentSelections],
-      totalOdd: Number(totalOdd.toFixed(2)),
+      totalOdd: placed.totalOdd,
       stake,
-      potentialReturn,
-      bonusPercentage,
-      bonusAmount: Number(bonusAmount.toFixed(2)),
+      potentialReturn: placed.potentialReturn,
+      bonusPercentage: 0,
+      bonusAmount: 0,
       status: 'OPEN',
-      cashoutValue: Number((stake * 0.95).toFixed(2)),
     };
-
-    setTickets((prev) => [newTicket, ...prev]);
-
-    // Create transaction record
-    const newTx: Transaction = {
-      id: `tx-bet-${Date.now()}`,
-      type: 'BET_PLACED',
-      amount: stake,
-      status: 'COMPLETED',
-      date: 'Agora',
-      description: `Aposta ${type === 'multiple' ? 'Múltipla' : 'Simples'} (${currentSelections.length} seleções)`,
-      txid: `BET-${Math.floor(100000 + Math.random() * 900000)}`,
-    };
-    const updatedTxs = [newTx, ...transactions];
-    setTransactions(updatedTxs);
-    saveTransactions(updatedTxs);
 
     // Clear slip
     setSelections([]);
+
+    setTickets((prev) => [newTicket, ...prev]);
+
+    // Saldo e extrato vem do banco: recarrega em vez de somar por conta propria.
+    await loadAccountData(currentUser.id);
+    playSoundEffect('goal');
     return true;
   };
 
-  const handleCashOut = (ticketId: string, amount: number) => {
-    playSoundEffect('cashout');
-    const updatedWallet: UserWallet = {
-      ...wallet,
-      realBalance: Number((wallet.realBalance + amount).toFixed(2)),
-    };
-    syncWalletToUser(updatedWallet);
-
-    setTickets((prev) =>
-      prev.map((t) => {
-        if (t.id === ticketId) {
-          return {
-            ...t,
-            status: 'CASHED_OUT',
-            cashedOutAmount: amount,
-            settledAt: 'Agora',
-          };
-        }
-        return t;
-      })
-    );
-
-    const newTx: Transaction = {
-      id: `tx-co-${Date.now()}`,
-      type: 'CASH_OUT',
-      amount: amount,
-      status: 'COMPLETED',
-      date: 'Agora',
-      description: `Cash Out Antecipado de Bilhete`,
-      txid: `CO-${Math.floor(100000 + Math.random() * 900000)}`,
-    };
-    const updatedTxs = [newTx, ...transactions];
-    setTransactions(updatedTxs);
-    saveTransactions(updatedTxs);
+  /**
+   * Cash out desativado.
+   *
+   * O valor de cash out e uma estimativa do motor de odds. Pagar sem uma Edge
+   * Function permitiria pedir o cash out de uma aposta ja liquidada e receber
+   * duas vezes. Fica bloqueado ate existir a liquidacao antecipada no servidor.
+   */
+  const handleCashOut = (_ticketId: string, _amount: number) => {
+    setToast('Cash out indisponivel: a liquidacao antecipada ainda nao foi integrada ao servidor.');
   };
 
   // Payment Handlers
-  const handleDepositSuccess = (amount: number, bonusAmount: number, tx: Transaction) => {
-    const updatedWallet: UserWallet = {
-      ...wallet,
-      realBalance: Number((wallet.realBalance + amount).toFixed(2)),
-      bonusBalance: Number((wallet.bonusBalance + bonusAmount).toFixed(2)),
-    };
-    syncWalletToUser(updatedWallet);
-
-    const updatedTxs = [tx, ...transactions];
-    setTransactions(updatedTxs);
-    saveTransactions(updatedTxs);
+  // Saldo e extrato sao relidos do banco depois da operacao. Somar no cliente
+  // duplicaria o valor que a transacao no Postgres ja aplicou.
+  const handleDepositSuccess = async () => {
+    if (!currentUser) return;
+    await loadAccountData(currentUser.id);
   };
 
-  const handleWithdrawSuccess = (amount: number, tx: Transaction) => {
-    const updatedWallet: UserWallet = {
-      ...wallet,
-      realBalance: Number(Math.max(0, wallet.realBalance - amount).toFixed(2)),
-    };
-    syncWalletToUser(updatedWallet);
-
-    const updatedTxs = [tx, ...transactions];
-    setTransactions(updatedTxs);
-    saveTransactions(updatedTxs);
+  const handleWithdrawSuccess = async () => {
+    if (!currentUser) return;
+    await loadAccountData(currentUser.id);
   };
 
   // Auth Handlers
+  // A sessao ja foi criada pelo AuthModal (signIn/signUp). Aqui so espelhamos
+  // o que o banco devolveu — nunca aceitamos objeto vindo do formulario.
   const handleLogin = (user: UserAccount) => {
     setCurrentUser(user);
-    saveCurrentUser(user);
     setWallet(user.wallet);
-    saveWallet(user.wallet);
+    void loadAccountData(user.id);
   };
 
-  const handleRegister = (newUser: UserAccount) => {
-    setUsers((prev) => {
-      const next = [newUser, ...prev];
-      saveUsers(next);
-      return next;
-    });
-    handleLogin(newUser);
-  };
-
-  const handleLogout = () => {
-    setCurrentUser(null);
-    saveCurrentUser(null);
-    setWallet({ realBalance: 0, bonusBalance: 0, currency: 'BRL' });
-  };
-
-  const handleUserUpdateLimit = (newLimit: number) => {
-    if (currentUser) {
-      const updated = { ...currentUser, dailyDepositLimit: newLimit };
-      setCurrentUser(updated);
-      saveCurrentUser(updated);
-      setUsers((prev) => {
-        const next = prev.map((u) => (u.id === currentUser.id ? updated : u));
-        saveUsers(next);
-        return next;
-      });
+  const handleLogout = async () => {
+    if (isSupabaseConfigured) {
+      try {
+        await authSignOut();
+      } catch {
+        // logout local acontece pelo onAuthStateChange de qualquer forma
+      }
     }
+    setCurrentUser(null);
+    setWallet({ realBalance: 0, bonusBalance: 0, currency: 'BRL' });
+    setTransactions([]);
+    setUsers([]);
+    setDepositRequests([]);
+    setWithdrawRequests([]);
+  };
+
+  // Alterar limite diario e mudanca de privilegio: a RLS bloqueia para o
+  // proprio usuario. Mantido aqui so para o painel do admin, que faz via
+  // service_role no backoffice.
+  const handleUserUpdateLimit = (_newLimit: number) => {
+    // intencionalmente vazio: ver nota acima
   };
 
   // Admin Backoffice Handlers
-  const handleApproveDeposit = (requestId: string) => {
-    const req = depositRequests.find((d) => d.id === requestId);
-    if (!req) return;
+  //
+  // Todos delegam para a Edge Function, que roda com service_role e faz a
+  // operacao dentro de transacao. Nao ha escrita direta em `wallets` aqui — a
+  // RLS proibe, e o estado da tela so e atualizado depois do servidor confirmar.
+  const handleApproveDeposit = async (requestId: string) => {
+    try {
+      await adminActions.approveDeposit(requestId);
+      const fresh = currentUser?.role === 'admin'
+        ? await fetchAllDeposits()
+        : await fetchDeposits(currentUser?.id ?? '');
+      setDepositRequests(fresh);
+      if (currentUser) await loadAccountData(currentUser.id);
+      playSoundEffect('goal');
+    } catch (err) {
+      setToast(toastMessage(err, 'Nao foi possivel aprovar o deposito.'));
+    }
+  };
 
-    // Mark as approved
-    const updatedReqs = depositRequests.map((d) =>
-      d.id === requestId
-        ? {
-            ...d,
-            status: 'APPROVED' as const,
-            reviewedAt: 'Agora',
-            reviewedBy: currentUser?.name || 'Administrador',
-          }
-        : d
-    );
-    setDepositRequests(updatedReqs);
-    saveDepositRequests(updatedReqs);
-    serverApproveDeposit(requestId);
+  const handleRejectDeposit = async (requestId: string) => {
+    try {
+      await adminActions.rejectDeposit(requestId);
+      setDepositRequests(
+        currentUser?.role === 'admin'
+          ? await fetchAllDeposits()
+          : await fetchDeposits(currentUser?.id ?? '')
+      );
+      if (currentUser) await loadAccountData(currentUser.id);
+    } catch (err) {
+      setToast(toastMessage(err, 'Nao foi possivel recusar o deposito.'));
+    }
+  };
 
-    // Credit target user
-    setUsers((prevUsers) => {
-      const nextUsers = prevUsers.map((u) => {
-        if (u.id === req.userId) {
-          const nextWallet: UserWallet = {
-            ...u.wallet,
-            realBalance: Number((u.wallet.realBalance + req.amount).toFixed(2)),
-            bonusBalance: Number((u.wallet.bonusBalance + req.bonusAmount).toFixed(2)),
-          };
-          // If approved user is the current active session
-          if (currentUser?.id === u.id) {
-            setWallet(nextWallet);
-            setCurrentUser({ ...u, wallet: nextWallet });
-          }
-          return { ...u, wallet: nextWallet };
-        }
-        return u;
-      });
-      saveUsers(nextUsers);
-      return nextUsers;
+  const handleApproveWithdraw = async (requestId: string) => {
+    try {
+      await adminActions.approveWithdraw(requestId);
+      setWithdrawRequests(
+        currentUser?.role === 'admin'
+          ? await fetchAllWithdrawals()
+          : await fetchWithdrawals(currentUser?.id ?? '')
+      );
+    } catch (err) {
+      setToast(toastMessage(err, 'Nao foi possivel aprovar o saque.'));
+    }
+  };
+
+  const handleRejectWithdraw = async (requestId: string) => {
+    try {
+      // O estorno acontece dentro da RPC; a tela nao soma saldo por conta propria.
+      await adminActions.rejectWithdraw(requestId);
+      setWithdrawRequests(
+        currentUser?.role === 'admin'
+          ? await fetchAllWithdrawals()
+          : await fetchWithdrawals(currentUser?.id ?? '')
+      );
+      if (currentUser) await loadAccountData(currentUser.id);
+    } catch (err) {
+      setToast(toastMessage(err, 'Nao foi possivel recusar o saque.'));
+    }
+  };
+
+  const handleToggleUserStatus = async (userId: string) => {
+    const target = users.find(u => u.id === userId);
+    if (!target) return;
+    const nextStatus = target.status === 'active' ? 'blocked' : 'active';
+
+    try {
+      await adminActions.toggleUserStatus(userId, nextStatus);
+      setUsers(await fetchAllProfiles());
+    } catch (err) {
+      setToast(toastMessage(err, 'Nao foi possivel alterar o status.'));
+    }
+  };
+
+  const handleSetUserRole = async (userId: string, role: 'user' | 'admin') => {
+    try {
+      await adminActions.setUserRole(userId, role);
+      const fresh = await fetchAllProfiles();
+      setUsers(fresh);
+      if (currentUser?.id === userId) {
+        const me = fresh.find((u) => u.id === userId);
+        if (me) setCurrentUser(me);
+        if (role === 'user') setAdminViewOpen(false);
+      }
+      setToast(role === 'admin' ? 'Usuário promovido a administrador.' : 'Usuário rebaixado para apostador.');
+    } catch (err) {
+      setToast(toastMessage(err, 'Nao foi possivel alterar o perfil.'));
+    }
+  };
+
+  const handleManualCreditUser = async (userId: string, amount: number) => {
+    try {
+      await adminActions.creditUser(userId, amount);
+      setUsers(await fetchAllProfiles());
+      if (currentUser?.id === userId) await loadAccountData(userId);
+    } catch (err) {
+      setToast(toastMessage(err, 'Nao foi possivel creditar o saldo.'));
+    }
+  };
+
+  const handleSaveHouseSettings = async (newSettings: HouseSettings) => {
+    try {
+      await adminActions.saveHouseSettings({ ...newSettings });
+      setHouseSettings(await fetchHouseSettings());
+    } catch (err) {
+      setToast(toastMessage(err, 'Nao foi possivel salvar as configuracoes.'));
+    }
+  };
+
+  /**
+   * Ajuste de cotacao eleitoral.
+   *
+   * O erro sobe de proposito para o painel mostrar ao lado do campo: um toast
+   * global esconderia qual candidato falhou quando o operador edita dez linhas.
+   */
+  const handleSaveElectionOdd = async (candidateId: string, odds: number) => {
+    await adminActions.setElectionOdd(candidateId, odds);
+    await loadElectionContests();
+  };
+
+  // CRUD completo de mercados eleitorais. O painel edita o catalogo inteiro:
+  // titulo, nome, partido, intencao de voto, fonte e odd — tudo pelo servidor.
+  const handleSaveElectionContest = async (contest: {
+    id?: string;
+    title: string;
+    scope?: 'PRESIDENT' | 'GOVERNOR';
+    stateCode?: string | null;
+    status?: 'OPEN' | 'SUSPENDED' | 'CLOSED';
+  }) => {
+    await adminActions.upsertElectionContest({
+      id: contest.id,
+      title: contest.title,
+      scope: contest.scope,
+      stateCode: contest.stateCode ?? null,
+      status: contest.status,
     });
-
-    // Add transaction record
-    const newTx: Transaction = {
-      id: `tx-appr-${Date.now()}`,
-      type: 'DEPOSIT_PIX',
-      amount: req.amount,
-      status: 'COMPLETED',
-      date: 'Agora',
-      description: `Depósito Aprovado pelo Administrador para ${req.userName}`,
-      endToEndId: req.endToEndId,
-      txid: req.txid,
-    };
-    const updatedTxs = [newTx, ...transactions];
-    setTransactions(updatedTxs);
-    saveTransactions(updatedTxs);
-
-    playSoundEffect('goal');
+    await loadElectionContests();
   };
 
-  const handleRejectDeposit = (requestId: string) => {
-    const updatedReqs = depositRequests.map((d) =>
-      d.id === requestId
-        ? {
-            ...d,
-            status: 'REJECTED' as const,
-            reviewedAt: 'Agora',
-            reviewedBy: currentUser?.name || 'Administrador',
-          }
-        : d
-    );
-    setDepositRequests(updatedReqs);
-    saveDepositRequests(updatedReqs);
-    serverRejectDeposit(requestId);
-  };
-
-  const handleApproveWithdraw = (requestId: string) => {
-    const updatedReqs = withdrawRequests.map((w) =>
-      w.id === requestId
-        ? {
-            ...w,
-            status: 'APPROVED' as const,
-            reviewedAt: 'Agora',
-            reviewedBy: currentUser?.name || 'Administrador',
-            endToEndId: `E0003816620261005${Date.now().toString().slice(-12)}`,
-          }
-        : w
-    );
-    setWithdrawRequests(updatedReqs);
-    saveWithdrawRequests(updatedReqs);
-    serverApproveWithdraw(requestId);
-  };
-
-  const handleRejectWithdraw = (requestId: string) => {
-    const req = withdrawRequests.find((w) => w.id === requestId);
-    if (!req) return;
-
-    const updatedReqs = withdrawRequests.map((w) =>
-      w.id === requestId
-        ? {
-            ...w,
-            status: 'REJECTED' as const,
-            reviewedAt: 'Agora',
-            reviewedBy: currentUser?.name || 'Administrador',
-          }
-        : w
-    );
-    setWithdrawRequests(updatedReqs);
-    saveWithdrawRequests(updatedReqs);
-    serverRejectWithdraw(requestId);
-
-    // Refund target user
-    setUsers((prevUsers) => {
-      const nextUsers = prevUsers.map((u) => {
-        if (u.id === req.userId) {
-          const nextWallet: UserWallet = {
-            ...u.wallet,
-            realBalance: Number((u.wallet.realBalance + req.amount).toFixed(2)),
-          };
-          if (currentUser?.id === u.id) {
-            setWallet(nextWallet);
-            setCurrentUser({ ...u, wallet: nextWallet });
-          }
-          return { ...u, wallet: nextWallet };
-        }
-        return u;
-      });
-      saveUsers(nextUsers);
-      return nextUsers;
+  const handleSaveElectionCandidate = async (candidate: {
+    id?: string;
+    contestId: string;
+    name: string;
+    party?: string | null;
+    odds?: number;
+    voteIntention?: number | null;
+    pollSource?: string | null;
+    pollDate?: string | null;
+    sortOrder?: number;
+  }) => {
+    await adminActions.saveElectionCandidate({
+      id: candidate.id,
+      contestId: candidate.contestId,
+      name: candidate.name,
+      party: candidate.party ?? null,
+      odds: candidate.odds,
+      voteIntention: candidate.voteIntention ?? null,
+      pollSource: candidate.pollSource ?? null,
+      pollDate: candidate.pollDate ?? null,
+      sortOrder: candidate.sortOrder,
     });
+    await loadElectionContests();
   };
 
-  const handleToggleUserStatus = (userId: string) => {
-    setUsers((prev) => {
-      const next = prev.map((u) => {
-        if (u.id === userId) {
-          const nextStatus = u.status === 'active' ? ('blocked' as const) : ('active' as const);
-          if (currentUser?.id === userId) {
-            setCurrentUser({ ...currentUser, status: nextStatus });
-          }
-          return { ...u, status: nextStatus };
-        }
-        return u;
-      });
-      saveUsers(next);
-      return next;
-    });
+  const handleDeleteElectionCandidate = async (candidateId: string) => {
+    await adminActions.deleteElectionCandidate(candidateId);
+    await loadElectionContests();
   };
 
-  const handleManualCreditUser = (userId: string, amount: number) => {
-    setUsers((prev) => {
-      const next = prev.map((u) => {
-        if (u.id === userId) {
-          const nextWallet: UserWallet = {
-            ...u.wallet,
-            realBalance: Number((u.wallet.realBalance + amount).toFixed(2)),
-          };
-          if (currentUser?.id === userId) {
-            setWallet(nextWallet);
-            setCurrentUser({ ...currentUser, wallet: nextWallet });
-          }
-          return { ...u, wallet: nextWallet };
-        }
-        return u;
-      });
-      saveUsers(next);
-      return next;
-    });
-
-    const newTx: Transaction = {
-      id: `tx-cred-${Date.now()}`,
-      type: 'DEPOSIT_PIX',
-      amount: amount,
-      status: 'COMPLETED',
-      date: 'Agora',
-      description: `Crédito Manual Injetado pelo Administrador`,
-    };
-    setTransactions((prev) => [newTx, ...prev]);
+  const handleDeleteElectionContest = async (contestId: string) => {
+    await adminActions.deleteElectionContest(contestId);
+    await loadElectionContests();
   };
 
-  const handleSaveHouseSettings = (newSettings: HouseSettings) => {
-    setHouseSettings(newSettings);
-    saveHouseSettings(newSettings);
+  // Pedidos feitos pelo usuario. A RPC calcula bonus/minimo/limite no servidor
+  // e debita o saque na hora.
+  //
+  // O erro sobe para o modal (que ja mostra um alert) em vez de virar toast
+  // escondido: sem propagar, a tela continuaria mostrando "comprovante enviado"
+  // com o pedido que nunca chegou ao banco.
+  const handleQueueDepositRequest = async (req: DepositRequest) => {
+    try {
+      const created = await createDepositRequest(req.amount, req.txid);
+      setDepositRequests(prev => [created, ...prev]);
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : 'Não foi possível registrar o depósito.');
+    }
   };
 
-  // Queue submission from Deposit/Withdraw modals
-  const handleQueueDepositRequest = (req: DepositRequest) => {
-    setDepositRequests((prev) => {
-      const next = [req, ...prev];
-      saveDepositRequests(next);
-      return next;
-    });
-  };
-
-  const handleQueueWithdrawRequest = (req: WithdrawRequest) => {
-    setWithdrawRequests((prev) => {
-      const next = [req, ...prev];
-      saveWithdrawRequests(next);
-      return next;
-    });
+  const handleQueueWithdrawRequest = async (req: WithdrawRequest) => {
+    try {
+      const created = await createWithdrawRequest(req.amount, req.pixKeyType, req.pixKey);
+      setWithdrawRequests(prev => [created, ...prev]);
+      if (currentUser) await loadAccountData(currentUser.id);
+    } catch (err) {
+      // Sobe para o modal: sem isso a tela mostraria recibo de um pedido que a
+      // RPC recusou (saldo insuficiente, minimo, conta bloqueada...).
+      throw new Error(err instanceof Error ? err.message : 'Não foi possível solicitar o saque.');
+    }
   };
 
   // Live Event Sandbox Handlers
@@ -873,6 +972,39 @@ export default function App() {
     });
   }, [matches, searchQuery, selectedSport, selectedLeague, timeFilter]);
 
+  // Pagina exclusiva do backoffice: substitui o site inteiro enquanto aberta.
+  // So e alcançada pelo dropdown do admin; qualquer outro perfil cai de volta
+  // ao site normal.
+  if (adminViewOpen && currentUser?.role === 'admin') {
+    return (
+      <AdminPanelPage
+        currentAdminId={currentUser.id}
+        users={users}
+        depositRequests={depositRequests}
+        withdrawRequests={withdrawRequests}
+        houseSettings={houseSettings}
+        electionContests={electionContests}
+        onApproveDeposit={handleApproveDeposit}
+        onRejectDeposit={handleRejectDeposit}
+        onApproveWithdraw={handleApproveWithdraw}
+        onRejectWithdraw={handleRejectWithdraw}
+        onToggleUserStatus={handleToggleUserStatus}
+        onManualCreditUser={handleManualCreditUser}
+        onSetUserRole={handleSetUserRole}
+        onSaveHouseSettings={handleSaveHouseSettings}
+        onSaveElectionOdd={handleSaveElectionOdd}
+        onSaveElectionContest={handleSaveElectionContest}
+        onSaveElectionCandidate={handleSaveElectionCandidate}
+        onDeleteElectionCandidate={handleDeleteElectionCandidate}
+        onDeleteElectionContest={handleDeleteElectionContest}
+        onBack={() => setAdminViewOpen(false)}
+        isSyncing={isSyncing}
+        onTriggerSync={handleTriggerSync}
+        onOpenApiSimulator={() => setIsApiModalOpen(true)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0b0e14] text-slate-100 flex flex-col font-sans">
       {/* Header */}
@@ -882,16 +1014,14 @@ export default function App() {
         liveMatchesCount={liveCount}
         onOpenDeposit={() => setIsDepositOpen(true)}
         onOpenWithdraw={() => setIsWithdrawOpen(true)}
-        onOpenApiModal={() => setIsApiModalOpen(true)}
         onOpenHistory={() => setIsHistoryOpen(true)}
         onOpenAuth={(mode) => {
           setAuthInitialMode(mode);
           setIsAuthOpen(true);
         }}
         onOpenDashboard={() => setIsDashboardOpen(true)}
-        onOpenAdminPanel={() => setIsAdminPanelOpen(true)}
+        onOpenAdminPanel={() => setAdminViewOpen(true)}
         onLogout={handleLogout}
-        pendingDepositsCount={pendingDepositsCount}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         activeSportFilter={selectedSport}
@@ -904,8 +1034,6 @@ export default function App() {
         autoAcceptOdds={autoAcceptOdds}
         onToggleAutoAcceptOdds={() => setAutoAcceptOdds(!autoAcceptOdds)}
         isSyncing={isSyncing}
-        lastSyncTime={lastSyncTime}
-        onTriggerSync={handleTriggerSync}
         onOpenElectionOfficial={() => setIsElectionModalOpen(true)}
       />
 
@@ -924,32 +1052,30 @@ export default function App() {
 
         {/* Center Main: Live Pitch Tracker + Match Cards */}
         <div className="flex-1 w-full min-w-0 flex flex-col">
-          {/* Official TSE Banner when viewing Presidential Politics */}
+          {/* Faixa do mercado eleitoral. O texto antigo prometia "dados oficiais TSE" e
+            "pesquisas auditadas (Datafolha / Quaest) com registro TSE" — nada
+            disso existe. O numero aqui e cotacao da casa. */}
           {selectedSport === 'politics' && (
-            <div className="mb-4 bg-gradient-to-r from-emerald-950/70 via-[#102419] to-emerald-950/70 border border-emerald-500/50 rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+            <div className="mb-4 bg-gradient-to-r from-amber-950/50 via-[#1f1a10] to-amber-950/50 border border-amber-500/40 rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#00e701]/20 border border-[#00e701]/40 flex items-center justify-center shrink-0">
-                  <ShieldCheck className="w-5 h-5 text-[#00e701]" />
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-5 h-5 text-amber-400" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs sm:text-sm font-extrabold text-white">
-                      Eleições 2026: Dados Oficiais TSE & Pesquisas Registradas
-                    </span>
-                    <span className="text-[10px] bg-emerald-500/20 text-[#00e701] font-bold px-1.5 py-0.2 rounded border border-emerald-500/40">
-                      ANTI-FAKE NEWS
-                    </span>
-                  </div>
+                  <span className="text-xs sm:text-sm font-extrabold text-white">
+                    Mercado eleitoral: presidente e governador
+                  </span>
                   <p className="text-[11px] text-slate-300 mt-0.5">
-                    Cotações fundamentadas no calendário eleitoral oficial e pesquisas auditadas (Datafolha / Quaest) com registro TSE.
+                    Os valores são cotação da casa, ajustáveis pela operação. Não são
+                    resultado de pesquisa nem registro eleitoral.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setIsElectionModalOpen(true)}
-                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs whitespace-nowrap cursor-pointer transition-colors shadow-sm"
+                className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs whitespace-nowrap cursor-pointer transition-colors shadow-sm"
               >
-                Ver Auditoria e Metodologia TSE
+                Ver cotações
               </button>
             </div>
           )}
@@ -1032,6 +1158,11 @@ export default function App() {
         isOpen={isDepositOpen}
         onClose={() => setIsDepositOpen(false)}
         currentUser={currentUser}
+        pixConfig={{
+          merchantKey: houseSettings.pixKey,
+          merchantName: houseSettings.pixMerchantName,
+          merchantCity: houseSettings.pixMerchantCity,
+        }}
         onDepositSuccess={handleDepositSuccess}
         onRequestDepositApproval={handleQueueDepositRequest}
       />
@@ -1041,6 +1172,7 @@ export default function App() {
         onClose={() => setIsWithdrawOpen(false)}
         wallet={wallet}
         currentUser={currentUser}
+        minWithdraw={houseSettings.minWithdraw}
         onWithdrawSuccess={handleWithdrawSuccess}
         onRequestWithdrawApproval={handleQueueWithdrawRequest}
       />
@@ -1056,8 +1188,10 @@ export default function App() {
         onClose={() => setIsApiModalOpen(false)}
         config={apiConfig}
         onSaveConfig={(cfg) => {
+          // Configuracao do painel de integracao e estado de sessao local do
+          // admin. Nao ha mais chave de API para guardar: as fontes de dados
+          // reais usam chave publica do Supabase.
           setApiConfig(cfg);
-          saveApiConfig(cfg);
         }}
         matches={matches}
         onTriggerEvent={handleTriggerEvent}
@@ -1070,9 +1204,7 @@ export default function App() {
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
-        users={users}
         onLogin={handleLogin}
-        onRegister={handleRegister}
         initialMode={authInitialMode}
       />
 
@@ -1096,31 +1228,39 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      <AdminPanelModal
-        isOpen={isAdminPanelOpen}
-        onClose={() => setIsAdminPanelOpen(false)}
-        users={users}
-        depositRequests={depositRequests}
-        withdrawRequests={withdrawRequests}
-        houseSettings={houseSettings}
-        onApproveDeposit={handleApproveDeposit}
-        onRejectDeposit={handleRejectDeposit}
-        onApproveWithdraw={handleApproveWithdraw}
-        onRejectWithdraw={handleRejectWithdraw}
-        onToggleUserStatus={handleToggleUserStatus}
-        onManualCreditUser={handleManualCreditUser}
-        onSaveHouseSettings={handleSaveHouseSettings}
-      />
-
       <ElectionOfficialModal
         isOpen={isElectionModalOpen}
-        onClose={() => setIsElectionModalOpen(false)}
-        data={officialElectionData}
-        onGoToBetting={() => {
-          setSelectedSport('politics');
-          setSelectedLeague('all');
+        onClose={() => {
+          setIsElectionModalOpen(false);
+          setElectionError(null);
         }}
+        contests={electionContests}
+        error={electionError}
+        isSubmitting={isElectionSubmitting}
+        walletBalance={wallet.realBalance + wallet.bonusBalance}
+        onPlaceBet={handlePlaceElectionBet}
+        onOpenAuth={mode => {
+          setAuthInitialMode(mode);
+          setIsAuthOpen(true);
+        }}
+        isAuthenticated={Boolean(currentUser)}
+        onOpenDeposit={() => setIsDepositOpen(true)}
       />
+
+      {/*
+        Toast de erro/sucesso. Estava faltando: todos os setToast() gravavam o
+        estado mas nada era renderizado, entao falha de aposta, saque ou sync
+        acontecia em silencio.
+      */}
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-4 left-1/2 z-[100] -translate-x-1/2 rounded-lg border border-red-500/40 bg-[#161b26] px-4 py-3 text-sm text-slate-100 shadow-xl max-w-[90vw]"
+        >
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

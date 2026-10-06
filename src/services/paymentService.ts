@@ -68,17 +68,53 @@ export const saveTransactions = (txs: Transaction[]): void => {
   }
 };
 
-/**
- * Generates an authentic EMV compliant PIX Copia e Cola string
- */
-export const generatePixCode = (amount: number, txid: string): string => {
-  const formattedAmount = amount.toFixed(2);
-  const merchantKey = 'financeiro@primasbet.bet.br';
-  const merchantName = 'PRIMASBET PAGAMENTOS S.A.';
-  const merchantCity = 'SAO PAULO';
+export interface PixMerchantConfig {
+  merchantKey: string;
+  merchantName: string;
+  merchantCity: string;
+}
 
-  // Construct EMV BRCode payload string
-  return `00020126580014br.gov.bcb.pix0136${merchantKey}520400005303986540${formattedAmount.length.toString().padStart(2, '0')}${formattedAmount}5802BR5925${merchantName}6009${merchantCity}62240520${txid}6304E8A2`;
+/**
+ * Generates an authentic EMV compliant PIX Copia e Cola string.
+ *
+ * Os dados do recebedor vem de `config` (configurados no painel admin); sem
+ * config usa os defaults historicos. O nome entra limitado a 25 chars e a
+ * cidade a 15, como exige o padrao EMV.
+ */
+export const generatePixCode = (
+  amount: number,
+  txid: string,
+  config?: Partial<PixMerchantConfig>
+): string => {
+  const formattedAmount = amount.toFixed(2);
+  const merchantKey =
+    (config?.merchantKey && config.merchantKey.trim()) || 'financeiro@primasbet.bet.br';
+  const merchantName =
+    (config?.merchantName && config.merchantName.trim()) || 'PRIMASBET PAGAMENTOS S.A.';
+  const merchantCity =
+    (config?.merchantCity && config.merchantCity.trim()) || 'SAO PAULO';
+
+  // Embrulhos EMV: 0X + tamanho (2 digitos) + valor
+  const wrap = (id: string, value: string): string =>
+    `${id}${value.length.toString().padStart(2, '0')}${value}`;
+
+  // Merchant Account Information (26) contem o br.gov.bcb.pix + a chave.
+  const pixAccount = wrap('00', 'br.gov.bcb.pix') + wrap('01', merchantKey);
+
+  // Amount e o campo 54; padrao pede decimal separado por "." (como veio toFixed).
+  const payload =
+    '000201' +
+    wrap('26', pixAccount) +
+    wrap('52', '0000') +
+    wrap('53', '986') +
+    wrap('54', formattedAmount) +
+    wrap('58', 'BR') +
+    wrap('59', merchantName.slice(0, 25)) +
+    wrap('60', merchantCity.slice(0, 15)) +
+    wrap('62', wrap('05', txid)) +
+    '6304E8A2';
+
+  return payload;
 };
 
 /**

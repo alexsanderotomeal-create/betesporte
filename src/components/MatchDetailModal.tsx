@@ -52,8 +52,8 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                   {match.homeTeam} {match.sport === 'politics' ? '·' : 'vs'} {match.awayTeam}
                 </span>
                 {match.sport === 'politics' && (
-                  <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-[#00e701] text-[10px] font-extrabold uppercase border border-emerald-500/40">
-                    Auditado TSE
+                  <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[10px] font-extrabold uppercase border border-amber-500/40">
+                    Cotação da casa
                   </span>
                 )}
               </div>

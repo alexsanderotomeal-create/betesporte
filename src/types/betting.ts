@@ -109,7 +109,7 @@ export interface BetTicket {
 
 export interface Transaction {
   id: string;
-  type: 'DEPOSIT_PIX' | 'WITHDRAW_PIX' | 'BET_PLACED' | 'BET_WON' | 'CASH_OUT';
+  type: 'DEPOSIT_PIX' | 'WITHDRAW_PIX' | 'BET_PLACED' | 'BET_WON' | 'BET_LOST' | 'CASH_OUT';
   amount: number;
   status: 'COMPLETED' | 'PENDING' | 'CANCELLED';
   date: string;

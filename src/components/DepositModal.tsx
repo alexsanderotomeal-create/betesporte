@@ -12,7 +12,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { generatePixCode, generatePixQrCodeDataUrl } from '../services/paymentService';
+import { generatePixCode, generatePixQrCodeDataUrl, PixMerchantConfig } from '../services/paymentService';
 import { Transaction } from '../types/betting';
 import { UserAccount, DepositRequest } from '../types/auth';
 
@@ -20,14 +20,21 @@ interface DepositModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser?: UserAccount | null;
+  /** Dados do recebedor para o QR PIX; vem da configuracao da casa (painel admin). */
+  pixConfig?: Partial<PixMerchantConfig>;
   onDepositSuccess: (amount: number, bonusAmount: number, tx: Transaction) => void;
-  onRequestDepositApproval?: (req: DepositRequest) => void;
+  /**
+   * Registra o pedido no servidor (RPC request_deposit) e devolve quando
+   * responder. O saldo NAO e creditado aqui: creditado na aprovacao do admin.
+   */
+  onRequestDepositApproval?: (req: DepositRequest) => void | Promise<void>;
 }
 
 export const DepositModal: React.FC<DepositModalProps> = ({
   isOpen,
   onClose,
   currentUser,
+  pixConfig,
   onDepositSuccess,
   onRequestDepositApproval,
 }) => {
@@ -37,6 +44,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
   const [step, setStep] = useState<'amount' | 'pix_code' | 'success'>('amount');
   
   const [pixPayload, setPixPayload] = useState<string>('');
+  const [txid, setTxid] = useState<string>('');
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [timeLeft, setTimeLeft] = useState<number>(900); // 15 minutes
@@ -78,11 +86,12 @@ export const DepositModal: React.FC<DepositModalProps> = ({
 
   const handleGeneratePix = async () => {
     if (amount < 10) return;
-    const txid = `PIX-${Date.now().toString().slice(-8)}`;
-    const code = generatePixCode(amount, txid);
+    const generatedTxid = `PIX-${Date.now().toString().slice(-8)}`;
+    const code = generatePixCode(amount, generatedTxid, pixConfig);
     const qrData = await generatePixQrCodeDataUrl(code);
 
     setPixPayload(code);
+    setTxid(generatedTxid);
     setQrCodeUrl(qrData);
     setStep('pix_code');
   };
@@ -94,33 +103,75 @@ export const DepositModal: React.FC<DepositModalProps> = ({
     setTimeout(() => setCopied(false), 2500);
   };
 
-  const handleSimulatePaymentApproval = () => {
+  /**
+   * Pedido local que vai ao servidor. O id/nome sao preenchidos de novo la
+   * dentro a partir da sessao, entao aqui so o valor importam — criar o objeto
+   * aqui e so para os dois botoes partilharem a mesma forma.
+   */
+  const buildDepositRequest = (): DepositRequest => ({
+    id: `dep-req-${Date.now()}`,
+    userId: currentUser?.id || 'guest',
+    userName: currentUser?.name || 'Apostador Convidado',
+    userCpf: currentUser?.cpf || '',
+    amount: amount,
+    bonusAmount: 0,
+    txid: txid,
+    paymentMethod: 'PIX',
+    date: 'Agora',
+    status: 'pending',
+  });
+
+  /**
+   * Envia o pedido para `request_deposit`, que trava o valor em locked_balance
+   * e ja calcula bonus/minimo no banco.
+   *
+   * O credito de saldo NAO acontece aqui: acontece quando o admin aprova. Esta
+   * funcao so registra que o usuario pagou.
+   */
+  const submitDepositRequest = async (): Promise<boolean> => {
+    try {
+      await onRequestDepositApproval?.(buildDepositRequest());
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleSimulatePaymentApproval = async () => {
+    if (isProcessingSimulated) return;
     setIsProcessingSimulated(true);
-    setTimeout(() => {
-      const bonusToAdd = includeBonus ? amount : 0;
-      const tx: Transaction = {
-        id: `tx-dep-${Date.now()}`,
-        type: 'DEPOSIT_PIX',
-        amount: amount,
-        status: 'COMPLETED',
-        date: 'Agora',
-        description: 'Depósito PIX Instantâneo',
-        endToEndId: `E0003816620261005${Date.now().toString().slice(-12)}`,
-        txid: `PIX-DEP-${Math.floor(10000000 + Math.random() * 90000000)}`,
-      };
 
-      onDepositSuccess(amount, bonusToAdd, tx);
-      setLastTx(tx);
-      setIsProcessingSimulated(false);
-      setStep('success');
+    const submitted = await submitDepositRequest();
 
-      confetti({
-        particleCount: 70,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#00e701', '#22c55e', '#eab308'],
-      });
-    }, 1200);
+    setIsProcessingSimulated(false);
+
+    if (!submitted) {
+      alert('Não foi possível registrar o depósito. Tente novamente.');
+      return;
+    }
+
+    const bonusToAdd = includeBonus ? amount : 0;
+    const tx: Transaction = {
+      id: `tx-dep-${Date.now()}`,
+      type: 'DEPOSIT_PIX',
+      amount: amount,
+      // Pendente, nao concluido: o saldo so entra na aprovacao do admin.
+      status: 'PENDING',
+      date: 'Agora',
+      description: 'Pedido de depósito PIX aguardando aprovação',
+      txid: txid,
+    };
+
+    onDepositSuccess(amount, bonusToAdd, tx);
+    setLastTx(tx);
+    setStep('success');
+
+    confetti({
+      particleCount: 70,
+      spread: 70,
+      origin: { y: 0.6 },
+      colors: ['#00e701', '#22c55e', '#eab308'],
+    });
   };
 
   const minutes = Math.floor(timeLeft / 60);
@@ -307,7 +358,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
               Abra o app do seu banco, escolha <strong>Pagar com PIX</strong>, aponte a câmera para o QR Code ou cole o código acima.
             </p>
 
-            {/* Action Buttons: Instant Approval OR Send to Admin Review */}
+            {/* Action Button: registers the request server-side */}
             <div className="w-full pt-2 border-t border-[#21262d] flex flex-col gap-2">
               <button
                 disabled={isProcessingSimulated}
@@ -315,38 +366,13 @@ export const DepositModal: React.FC<DepositModalProps> = ({
                 className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md cursor-pointer transition-all"
               >
                 {isProcessingSimulated ? (
-                  <span className="animate-pulse">Validando transação com o BACEN...</span>
+                  <span className="animate-pulse">Registrando pedido no servidor...</span>
                 ) : (
                   <>
                     <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-                    <span>Simular Pagamento Aprovado (PIX SPI)</span>
+                    <span>Enviar para aprovação manual do admin</span>
                   </>
                 )}
-              </button>
-
-              <button
-                onClick={() => {
-                  const req: DepositRequest = {
-                    id: `dep-req-${Date.now()}`,
-                    userId: currentUser?.id || 'guest',
-                    userName: currentUser?.name || 'Apostador Convidado',
-                    userCpf: currentUser?.cpf || '123.456.789-00',
-                    amount: amount,
-                    bonusAmount: includeBonus ? amount : 0,
-                    txid: `PIX-DEP-${Math.floor(10000000 + Math.random() * 90000000)}`,
-                    pixCode: pixPayload,
-                    date: 'Agora',
-                    status: 'PENDING',
-                    endToEndId: `E0003816620261005${Date.now().toString().slice(-12)}`,
-                    notes: 'Aguardando validação e aprovação manual da administração',
-                  };
-                  onRequestDepositApproval?.(req);
-                  alert('Comprovante enviado com sucesso! O Administrador já pode aprovar no Painel Admin.');
-                  onClose();
-                }}
-                className="w-full py-2 rounded-xl bg-[#21262d] hover:bg-[#30363d] text-amber-300 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-colors border border-amber-500/30"
-              >
-                <span>Enviar para Aprovação Manual do Admin</span>
               </button>
 
               <button
@@ -367,9 +393,10 @@ export const DepositModal: React.FC<DepositModalProps> = ({
             </div>
 
             <div>
-              <h3 className="text-lg font-bold text-white">Depósito Confirmado!</h3>
+              <h3 className="text-lg font-bold text-white">Pedido registrado!</h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Os fundos foram creditados instantaneamente no seu saldo PrimasBet.
+                O depósito foi enviado e está aguardando aprovação da administração.
+                O saldo só entra no acesso depois da aprovação.
               </p>
             </div>
 
@@ -384,20 +411,20 @@ export const DepositModal: React.FC<DepositModalProps> = ({
 
               {includeBonus && (
                 <div className="flex items-center justify-between border-b border-[#21262d] pb-2 text-amber-400">
-                  <span>Bônus Concedido</span>
+                  <span>Bônus previsto</span>
                   <span className="font-mono font-bold">+ R$ {amount.toFixed(2)}</span>
                 </div>
               )}
 
               <div className="flex items-center justify-between text-slate-400 text-[11px]">
                 <span>Status</span>
-                <span className="text-emerald-400 font-semibold">Liquidado via SPI</span>
+                <span className="text-amber-400 font-semibold">Aguardando aprovação</span>
               </div>
 
               <div className="flex items-center justify-between text-slate-400 text-[11px]">
-                <span>ID E2E</span>
+                <span>TXID</span>
                 <span className="font-mono text-slate-300 truncate max-w-[200px]">
-                  {lastTx.endToEndId}
+                  {lastTx.txid || '—'}
                 </span>
               </div>
             </div>

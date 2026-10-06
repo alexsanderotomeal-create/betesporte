@@ -24,7 +24,7 @@ interface BetSlipProps {
   onAcceptOddChange: (matchId: string, marketId: string, choiceId: string) => void;
   autoAcceptOdds: boolean;
   wallet: UserWallet;
-  onPlaceBet: (stake: number, type: 'single' | 'multiple', selections: BetSelection[]) => boolean;
+  onPlaceBet: (stake: number, type: 'single' | 'multiple', selections: BetSelection[]) => Promise<boolean>;
   tickets: BetTicket[];
   onCashOut: (ticketId: string, amount: number) => void;
   onOpenDeposit: () => void;
@@ -54,6 +54,7 @@ export const BetSlip: React.FC<BetSlipProps> = ({
   const [betType, setBetType] = useState<'single' | 'multiple'>('multiple');
   const [stake, setStake] = useState<string>('20');
   const [lastPlacedTicket, setLastPlacedTicket] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const numStake = parseFloat(stake) || 0;
 
@@ -81,15 +82,24 @@ export const BetSlip: React.FC<BetSlipProps> = ({
     setStake((cur + amount).toString());
   };
 
-  const handleFinalizeBet = () => {
+  // Async porque a aposta passa por `place_bet_atomic` no Postgres. A celebracao
+// so dispara se o banco confirmar o debito — antes, bastava subtrair na tela.
+  const handleFinalizeBet = async () => {
     if (selections.length === 0 || numStake <= 0) return;
     if (isInsufficientBalance) {
       onOpenDeposit();
       return;
     }
 
-    const success = onPlaceBet(numStake, selections.length > 1 ? betType : 'single', selections);
-    if (success) {
+    setIsSubmitting(true);
+    try {
+      const success = await onPlaceBet(
+        numStake,
+        selections.length > 1 ? betType : 'single',
+        selections
+      );
+      if (!success) return;
+
       playSoundEffect('bet_placed');
       confetti({
         particleCount: 50,
@@ -100,6 +110,8 @@ export const BetSlip: React.FC<BetSlipProps> = ({
       setLastPlacedTicket(Date.now().toString());
       setTimeout(() => setLastPlacedTicket(null), 4000);
       setActiveTab('my_bets');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -109,7 +121,7 @@ export const BetSlip: React.FC<BetSlipProps> = ({
   return (
     <>
       {/* Mobile Floating Drawer Trigger */}
-      <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-[#12161f] border-t border-[#21262d] p-3 shadow-2xl flex items-center justify-between">
+      <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-[#12161f] border-t border-[#21262d] p-3 shadow-2xl flex items-center justify-between">
         <button
           onClick={onToggleMobile}
           className="flex-1 flex items-center justify-between bg-[#161b22] border border-[#30363d] px-3.5 py-2 rounded-xl text-left"
@@ -137,9 +149,9 @@ export const BetSlip: React.FC<BetSlipProps> = ({
 
       {/* Main Bet Slip Container (Desktop Sidebar & Mobile Drawer) */}
       <aside
-        className={`w-full lg:w-80 shrink-0 flex flex-col bg-[#12161f] border border-[#21262d] rounded-2xl shadow-xl overflow-hidden transition-all duration-300 z-40 ${
+        className={`w-full lg:w-80 shrink-0 flex flex-col bg-[#12161f] border border-[#21262d] rounded-2xl shadow-xl overflow-hidden transition-all duration-300 z-30 ${
           isMobileOpen 
-            ? 'fixed inset-x-0 bottom-16 max-h-[80vh] m-2 z-50 flex' 
+            ? 'fixed inset-x-0 bottom-16 max-h-[80vh] m-2 z-30 flex' 
             : 'hidden lg:flex sticky top-20 self-start max-h-[calc(100vh-6rem)]'
         }`}
       >

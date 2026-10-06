@@ -15,8 +15,11 @@ interface WithdrawModalProps {
   onClose: () => void;
   wallet: UserWallet;
   currentUser?: UserAccount | null;
+  /** Valor mínimo lido de system_settings, para bater com o servidor. */
+  minWithdraw?: number;
   onWithdrawSuccess: (amount: number, tx: Transaction) => void;
-  onRequestWithdrawApproval?: (req: WithdrawRequest) => void;
+  /** Registra o pedido no servidor. Deve rejeitar quando a RPC falhar. */
+  onRequestWithdrawApproval?: (req: WithdrawRequest) => void | Promise<void>;
 }
 
 export const WithdrawModal: React.FC<WithdrawModalProps> = ({
@@ -24,6 +27,7 @@ export const WithdrawModal: React.FC<WithdrawModalProps> = ({
   onClose,
   wallet,
   currentUser,
+  minWithdraw = 30,
   onWithdrawSuccess,
   onRequestWithdrawApproval,
 }) => {
@@ -43,10 +47,15 @@ export const WithdrawModal: React.FC<WithdrawModalProps> = ({
     setAmount(maxAvailable.toString());
   };
 
-  const handleExecuteWithdraw = () => {
+  /**
+   * Envia o pedido para `request_withdraw`, que debita o saldo da carteira na
+   * mesma transação. Enquanto o pedido existe, o valor ja sai do disponível —
+   * é isso que impede sacar duas vezes.
+   */
+  const handleExecuteWithdraw = async () => {
     setErrorMessage('');
-    if (numAmount < 20) {
-      setErrorMessage('O valor mínimo de saque é R$ 20,00.');
+    if (numAmount < minWithdraw) {
+      setErrorMessage(`O valor mínimo de saque é R$ ${minWithdraw.toFixed(2)}.`);
       return;
     }
     if (numAmount > maxAvailable) {
@@ -59,37 +68,40 @@ export const WithdrawModal: React.FC<WithdrawModalProps> = ({
     }
 
     setIsProcessing(true);
-    setTimeout(() => {
+    try {
+      await onRequestWithdrawApproval?.({
+        id: `wdr-req-${Date.now()}`,
+        userId: currentUser?.id || 'guest',
+        userName: currentUser?.name || 'Apostador Convidado',
+        userCpf: currentUser?.cpf || '',
+        amount: numAmount,
+        pixKeyType: pixKeyType.toUpperCase(),
+        pixKey: pixKey.trim(),
+        date: 'Agora',
+        status: 'pending',
+        notes: `Saque solicitado para chave ${pixKeyType.toUpperCase()}`,
+      });
+
       const tx: Transaction = {
         id: `tx-wdr-${Date.now()}`,
         type: 'WITHDRAW_PIX',
         amount: numAmount,
-        status: 'COMPLETED',
+        // Pendente: o saque precisa ser aprovado para sair do bank.
+        status: 'PENDING',
         date: 'Agora',
         description: `Saque PIX para chave ${pixKeyType.toUpperCase()} (${pixKey})`,
         pixKey: `${pixKeyType}: ${pixKey}`,
-        endToEndId: `E0003816620261005${Date.now().toString().slice(-12)}`,
-        txid: `PIX-SAQ-${Math.floor(10000000 + Math.random() * 90000000)}`,
       };
 
       onWithdrawSuccess(numAmount, tx);
-
-      onRequestWithdrawApproval?.({
-        id: `wdr-req-${Date.now()}`,
-        userId: currentUser?.id || 'guest',
-        userName: currentUser?.name || 'Apostador Convidado',
-        userCpf: currentUser?.cpf || '123.456.789-00',
-        amount: numAmount,
-        pixKeyType: pixKeyType.toUpperCase(),
-        pixKey,
-        date: 'Agora',
-        status: 'PENDING',
-        notes: `Saque solicitado para chave ${pixKeyType.toUpperCase()}`,
-      });
-
       setSuccessReceipt(tx);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Não foi possível solicitar o saque.'
+      );
+    } finally {
       setIsProcessing(false);
-    }, 1500);
+    }
   };
 
   return (

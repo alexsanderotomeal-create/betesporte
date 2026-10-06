@@ -16,6 +16,14 @@ export interface UserAccount {
   createdAt: string;
 }
 
+/**
+ * Status de pedido. Minusculo porque e assim que o banco guarda: deposits.status
+ * e withdrawals.status sao TEXT com default 'pending' e 13 pedidos historicos
+ * ja gravados como 'approved'/'rejected'. Um union maiusculo aqui obrigaria a
+ * traduzir em cada ponto e a UI pararia de achar os pedidos antigos.
+ */
+export type RequestStatus = 'pending' | 'approved' | 'rejected';
+
 export interface DepositRequest {
   id: string;
   userId: string;
@@ -23,14 +31,13 @@ export interface DepositRequest {
   userCpf: string;
   amount: number;
   bonusAmount: number;
+  /** transaction_id do PIX. Vazio quando o usuario ainda nao informou. */
   txid: string;
-  pixCode: string;
+  /** payment_method como veio do banco ("PIX", "Mercado Pago (PIX)", ...). */
+  paymentMethod: string;
   date: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  endToEndId: string;
+  status: RequestStatus;
   notes?: string;
-  reviewedAt?: string;
-  reviewedBy?: string;
 }
 
 export interface WithdrawRequest {
@@ -42,11 +49,8 @@ export interface WithdrawRequest {
   pixKeyType: string;
   pixKey: string;
   date: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  endToEndId?: string;
+  status: RequestStatus;
   notes?: string;
-  reviewedAt?: string;
-  reviewedBy?: string;
 }
 
 export interface HouseSettings {
@@ -58,4 +62,14 @@ export interface HouseSettings {
   autoApproveThreshold: number;
   houseMarginPercent: number;
   maintenanceMode: boolean;
+  /** Chave PIX que os clientes veem no QR de deposito. Vem de system_settings. */
+  pixKey: string;
+  /** Nome do recebedor exibido no PIX (limitado a 25 chars pelo EMV). */
+  pixMerchantName: string;
+  /** Cidade do recebedor no payload PIX (limitado a 15 chars). */
+  pixMerchantCity: string;
+  /** Dados da conta bancaria para transferencias manuais. */
+  bankName: string;
+  bankAgency: string;
+  bankAccount: string;
 }

@@ -1,14 +1,18 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
+import {fileURLToPath} from 'node:url';
 import {defineConfig} from 'vite';
+
+// import.meta.dirname em vez de __dirname: o loader nativo do Vite nao injeta
+// __dirname e imprimia aviso a cada build.
+const projectRoot = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': projectRoot,
       },
     },
     server: {

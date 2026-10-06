@@ -39,11 +39,10 @@ export interface ApiTestResult {
 
 export const testExternalApiConnection = async (url: string, apiKey: string): Promise<ApiTestResult> => {
   const startTime = performance.now();
-  try {
-    // If user provided a URL, attempt fetch with timeout
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4000);
 
+  try {
     const res = await fetch(url, {
       method: 'GET',
       headers: {
@@ -52,42 +51,46 @@ export const testExternalApiConnection = async (url: string, apiKey: string): Pr
       },
       signal: controller.signal,
     });
-    clearTimeout(timeout);
 
     const latency = Math.round(performance.now() - startTime);
 
     if (res.ok) {
-      const data = await res.json().catch(() => ({ status: 'ok', message: 'Endpoint respondeu com sucesso' }));
+      const data = await res.json().catch(() => ({ status: 'ok' }));
       return {
         success: true,
         latencyMs: latency,
-        message: `Conexão bem-sucedida! Status HTTP ${res.status}`,
+        message: `Conexao bem-sucedida! Status HTTP ${res.status}`,
         sampleData: data,
       };
-    } else {
-      return {
-        success: false,
-        latencyMs: latency,
-        message: `Servidor retornou erro HTTP ${res.status}: ${res.statusText}`,
-      };
     }
+
+    return {
+      success: false,
+      latencyMs: latency,
+      message: `Servidor retornou erro HTTP ${res.status}: ${res.statusText}`,
+    };
   } catch (err: unknown) {
     const latency = Math.round(performance.now() - startTime);
-    const errorMsg = err instanceof Error ? err.message : 'Falha na requisição';
-    
-    // In browser if CORS blocks external unproxied endpoints, explain clearly and provide simulated fallback
+    // Reporta a falha de verdade.
+    //
+    // Antes, este catch devolvia success: true com um payload inventado de
+    // "Opta/SportRadar Bridge". Um teste de conexao que nunca falha esconde
+    // justamente o problema que ele deveria acusar: CORS bloqueado, chave
+    // invalida ou endpoint fora do ar. No navegador, o erro real costuma ser
+    // "Failed to fetch" porque o CORS nao expõe o status ao JS.
+    const reason =
+      err instanceof DOMException && err.name === 'AbortError'
+        ? 'Timeout de 4s ao responder.'
+        : err instanceof Error
+          ? err.message
+          : 'Falha na requisicao.';
+
     return {
-      success: true,
-      latencyMs: Math.max(28, latency),
-      message: `Modo Híbrido Ativo: Simulador conectado em alta frequência (${errorMsg.includes('abort') ? 'Timeout' : 'Simulação de feed externo OK'})`,
-      sampleData: {
-        feed: 'PrimasBet Sports Feed v2.4',
-        provider: 'Opta/SportRadar Bridge',
-        activeMatches: 6,
-        latency: `${latency}ms`,
-        oddsUpdateFrequency: '3000ms',
-        status: 'ONLINE',
-      },
+      success: false,
+      latencyMs: latency,
+      message: `Falha ao conectar (${reason}) Se for CORS, o endpoint precisa enviar Access-Control-Allow-Origin.`,
     };
+  } finally {
+    clearTimeout(timeout);
   }
 };

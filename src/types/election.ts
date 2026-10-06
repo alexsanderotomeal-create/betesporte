@@ -1,62 +1,82 @@
-export interface CandidatePollData {
+/**
+ * Mercados eleitorais.
+ *
+ * Antes este arquivo era um "agregador de pesquisas registradas no TSE": com
+ * percentuais de voto, nomes de institutos (Datafolha, Quaest), numero de
+ * registro, margem de erro e tamanho de amostra. Nenhum desses numeros existia.
+ * Eram inventados e atribuidos a instituicoes e a Justiça Eleitoral reais, num
+ * produto que cobra dinheiro do usuario. Isso sai.
+ *
+ * O que e agora: candidatos a presidente e a governador, e o PRECO que a casa
+ * paga por cada um. Odd nao e pesquisa — e cotacao. Sobe, desce e e ajustada
+ * pela operacao, como o preco de qualquer outro mercado. O escopo e presidente
+ * e governador; nada de senador, deputado ou prefeito.
+ *
+ * Odd e payout persistidos no Postgres e validados dentro da transacao de
+ * aposta. Ver src/services/dataService.ts e
+ * supabase/migrations/0003_election_market.sql.
+ */
+
+export type ElectionScope = 'PRESIDENT' | 'GOVERNOR';
+
+export interface ElectionCandidate {
+  id: string;
   name: string;
-  party: string;
-  percentage: number;
-  rejectionRate: number;
-  trend: 'up' | 'down' | 'stable';
+  party: string | null;
+  /** Preco atual da casa. Decimal, mesmo formato das odds de futebol. */
+  odds: number;
+  /** Odd anterior, para o operador ver a variacao. */
+  previousOdds?: number;
+  /** Sobe, desce ou parado em relacao ao preco anterior. */
+  trend?: 'up' | 'down' | 'stable';
+  /** Intencao de voto (%) real — apuracao oficial ou pesquisa registrada. */
+  voteIntention?: number | null;
+  /** Fonte da intencao (ex.: "TSE", "Datafolha" ...). */
+  pollSource?: string | null;
+  /** Data da apuracao/pesquisa. */
+  pollDate?: string | null;
 }
 
-export interface ResearchAggregatorData {
-  institute: string;
-  registryTSE: string;
-  confidenceLevel: string;
-  marginOfError: string;
-  sampleSize: number;
-  collectionDate: string;
-  candidates: CandidatePollData[];
-}
-
-export interface OfficialElectionData {
+export interface ElectionContest {
+  id: string;
+  scope: ElectionScope;
+  /** NULL so para presidente: a votacao e nacional. */
+  stateCode: string | null;
   title: string;
-  source: string;
-  tseResolution: string;
-  electionDates: {
-    firstRound: string;
-    secondRound: string;
-  };
-  totalElectorsEstimate: number;
-  lastUpdated: string;
-  researchAggregator: ResearchAggregatorData;
-  antiFakeNewsNotice: string;
+  status: 'OPEN' | 'SUSPENDED' | 'CLOSED';
+  /** Data do 2o turno (null enquanto nao cadastrada). */
+  electionDate?: string | null;
+  candidates: ElectionCandidate[];
 }
 
-export const OFFICIAL_ELECTION_INITIAL: OfficialElectionData = {
-  title: 'Eleições Gerais Brasil 2026 - Presidência da República',
-  source: 'TSE - Tribunal Superior Eleitoral & Agregador Oficial de Pesquisas Registradas',
-  tseResolution: 'Calendário Eleitoral Oficial da Justiça Eleitoral do Brasil',
-  electionDates: {
-    firstRound: '04 de Outubro de 2026 (1º Turno)',
-    secondRound: '25 de Outubro de 2026 (2º Turno, se houver)',
-  },
-  totalElectorsEstimate: 156454011,
-  lastUpdated: '05/10/2026 13:30 (Horário de Brasília)',
-  researchAggregator: {
-    institute: 'Consórcio de Pesquisas Oficiais Registradas (Datafolha / Quaest)',
-    registryTSE: 'BR-08942/2026',
-    confidenceLevel: '95%',
-    marginOfError: '± 2,0 pontos percentuais',
-    sampleSize: 2540,
-    collectionDate: 'Outubro de 2026',
-    candidates: [
-      { name: 'Tarcísio de Freitas', party: 'Republicanos / Apoio PL', percentage: 33.5, rejectionRate: 36.2, trend: 'up' },
-      { name: 'Luiz Inácio Lula da Silva', party: 'PT / Federação Brasil da Esperança', percentage: 32.8, rejectionRate: 41.5, trend: 'stable' },
-      { name: 'Ratinho Jr', party: 'PSD', percentage: 11.2, rejectionRate: 22.0, trend: 'up' },
-      { name: 'Romeu Zema', party: 'Novo', percentage: 8.4, rejectionRate: 27.5, trend: 'down' },
-      { name: 'Ronaldo Caiado', party: 'União Brasil', percentage: 6.1, rejectionRate: 24.1, trend: 'stable' },
-      { name: 'Ciro Gomes', party: 'PDT', percentage: 4.0, rejectionRate: 48.0, trend: 'stable' },
-      { name: 'Simone Tebet', party: 'MDB', percentage: 2.8, rejectionRate: 31.0, trend: 'stable' },
-      { name: 'Brancos / Nulos / Indecisos', party: 'Votos Não Válidos', percentage: 1.2, rejectionRate: 0, trend: 'stable' },
-    ],
-  },
-  antiFakeNewsNotice: 'Atenção: Todas as cotações eleitorais são baseadas estritamente em dados oficiais registrados perante a Justiça Eleitoral (TSE) e pesquisas de institutos consolidados. Proibida veiculação de dados sem registro ou fake news eleitoral (Art. 323 do Código Eleitoral).',
+/**
+ * Frappe que explica o que o numero e. Aparece na tela de aposta.
+ *
+ * Sem ela o usuario le "33,5%" e entende pesquisa de instituto — que e
+ * exatamente o mal-entendido que este mercado nao quer criar.
+ */
+export const ELECTION_SOURCE_NOTE =
+  'Os valores sao cotacoes da casa, nao resultados de pesquisa. Ajustaveis pela operacao e registrados com autor e hora.';
+
+/** Como o mercado liquida. Exibido antes da aposta. */
+export const ELECTION_SETTLEMENT_RULE =
+  'Apostas liquidam com o candidato mais votado na urna de 1o turno. Em caso de empate, o mercado e anulado e o valor estornado.';
+
+/** Escopos suportados, na ordem em que aparecem. */
+export const ELECTION_SCOPES: ElectionScope[] = ['PRESIDENT', 'GOVERNOR'];
+
+export const ELECTION_SCOPE_LABEL: Record<ElectionScope, string> = {
+  PRESIDENT: 'Presidencia da Republica',
+  GOVERNOR: 'Governo estadual',
 };
+
+/** Retorna 'up' | 'down' | 'stable' a partir do preco atual e do anterior. */
+export function electionTrend(
+  odds: number,
+  previousOdds?: number
+): 'up' | 'down' | 'stable' {
+  if (previousOdds == null) return 'stable';
+  if (odds > previousOdds) return 'up';
+  if (odds < previousOdds) return 'down';
+  return 'stable';
+}

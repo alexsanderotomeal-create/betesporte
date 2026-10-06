@@ -3,6 +3,22 @@ build/
 dist/
 coverage/
 .DS_Store
+
+# Banco de dados local gerado em runtime
+data/
 *.log
+
+# ---------------------------------------------------------------------------
+# Credenciais
+#
+# .env.example guarda a service role (sb_secret_...), que ignora a RLS. Nenhum
+# arquivo .env* vai para o git — inclusive o .example. A chave entra no CI pela
+# environment da Vercel e nas Edge Functions por `supabase secrets set`.
+# ---------------------------------------------------------------------------
+.env
+.env.*
 .env*
-!.env.example
+!.env.template
+
+# Supabase CLI cache / links locais
+supabase/.temp/

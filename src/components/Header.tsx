@@ -6,7 +6,6 @@ import {
   ArrowDownLeft, 
   Eye, 
   EyeOff, 
-  Activity, 
   Settings, 
   History, 
   Search, 
@@ -17,10 +16,8 @@ import {
   User,
   Shield,
   LogOut,
-  Sliders,
   Sparkles,
-  RefreshCw,
-  Database
+  RefreshCw
 } from 'lucide-react';
 import { UserWallet } from '../types/betting';
 import { UserAccount } from '../types/auth';
@@ -31,13 +28,11 @@ interface HeaderProps {
   liveMatchesCount: number;
   onOpenDeposit: () => void;
   onOpenWithdraw: () => void;
-  onOpenApiModal: () => void;
   onOpenHistory: () => void;
   onOpenAuth: (mode: 'login' | 'register') => void;
   onOpenDashboard: () => void;
   onOpenAdminPanel: () => void;
   onLogout: () => void;
-  pendingDepositsCount: number;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   activeSportFilter: string;
@@ -47,8 +42,6 @@ interface HeaderProps {
   autoAcceptOdds: boolean;
   onToggleAutoAcceptOdds: () => void;
   isSyncing?: boolean;
-  lastSyncTime?: string;
-  onTriggerSync?: () => void;
   onOpenElectionOfficial?: () => void;
 }
 
@@ -58,13 +51,11 @@ export const Header: React.FC<HeaderProps> = ({
   liveMatchesCount,
   onOpenDeposit,
   onOpenWithdraw,
-  onOpenApiModal,
   onOpenHistory,
   onOpenAuth,
   onOpenDashboard,
   onOpenAdminPanel,
   onLogout,
-  pendingDepositsCount,
   searchQuery,
   onSearchChange,
   activeSportFilter,
@@ -74,8 +65,6 @@ export const Header: React.FC<HeaderProps> = ({
   autoAcceptOdds,
   onToggleAutoAcceptOdds,
   isSyncing = false,
-  lastSyncTime = 'Agora',
-  onTriggerSync,
   onOpenElectionOfficial,
 }) => {
   const [showBalance, setShowBalance] = useState(true);
@@ -136,65 +125,26 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* User Balance, Admin Panel, Database Sync & Auth */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Official TSE Anti-Fake News Badge Button */}
+          {/* Atalho do mercado eleitoral. O rotulo antigo dizia "Dados TSE Oficiais" com
+              title sobre "checagem anti-fake news" — nada disso existe. */}
           {onOpenElectionOfficial && (
             <button
               onClick={onOpenElectionOfficial}
-              className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-950/40 border border-emerald-500/40 hover:bg-emerald-900/40 text-emerald-300 text-xs font-semibold transition-colors cursor-pointer"
-              title="Ver dados oficiais registrados no TSE e checagem anti-fake news"
+              className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-950/40 border border-amber-500/40 hover:bg-amber-900/40 text-amber-300 text-xs font-semibold transition-colors cursor-pointer"
+              title="Cotações do mercado eleitoral (presidente e governador)"
             >
-              <ShieldCheck className="w-3.5 h-3.5 text-[#00e701]" />
-              <span>Dados TSE Oficiais</span>
+              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+              <span>Mercado Eleitoral</span>
             </button>
           )}
 
-          {/* Database Sync Button */}
-          {onTriggerSync && (
-            <button
-              onClick={onTriggerSync}
-              disabled={isSyncing}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-[#00e701]/60 text-slate-200 text-xs font-semibold transition-colors cursor-pointer"
-              title={`Sincronizar dados em tempo real com o banco de dados oficial (Última sincronização: ${lastSyncTime})`}
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-[#00e701] ${isSyncing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">
-                {isSyncing ? 'Sincronizando...' : 'Sync API'}
-              </span>
-            </button>
-          )}
-
-          {/* Admin Panel Quick Access Button */}
-          <button
-            onClick={onOpenAdminPanel}
-            className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
-              currentUser?.role === 'admin'
-                ? 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/50 shadow-sm'
-                : 'bg-[#161b22] border-[#30363d] text-slate-300 hover:text-white'
-            }`}
-            title="Acessar Painel de Controle Administrativo"
-          >
-            <Shield className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden sm:inline">Admin</span>
-            {pendingDepositsCount > 0 && (
-              <span className="px-1.5 py-0.2 bg-amber-400 text-black font-extrabold rounded-full text-[10px] font-mono animate-pulse">
-                {pendingDepositsCount}
-              </span>
-            )}
-          </button>
-
-          {/* API Integration / Simulator Status Button */}
-          <button
-            onClick={onOpenApiModal}
-            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-[#00e701]/50 text-slate-300 hover:text-white text-xs transition-colors"
-            title="Configurar Integração de API Esportiva / Simulador em Tempo Real"
-          >
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00e701] opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00e701]"></span>
+          {/* Database Sync Notification (indicador, sem botao de acao) */}
+          {isSyncing && (
+            <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] text-[#00e701] text-xs font-semibold">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              <span className="hidden sm:inline">Sincronizando...</span>
             </span>
-            <Activity className="w-3.5 h-3.5 text-[#00e701]" />
-            <span className="hidden xl:inline font-medium">API Feed</span>
-          </button>
+          )}
 
           {/* User Logged In: Wallet Balance & Profile / Dashboard */}
           {currentUser ? (
