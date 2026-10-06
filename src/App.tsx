@@ -69,6 +69,7 @@ import { AuthModal } from './components/AuthModal';
 import { UserDashboardModal } from './components/UserDashboardModal';
 import { AdminPanelPage } from './components/AdminPanelPage';
 import { ElectionOfficialModal } from './components/ElectionOfficialModal';
+import { ElectionShowcase } from './components/ElectionShowcase';
 import { ShieldCheck } from 'lucide-react';
 import { ElectionContest } from './types/election';
 
@@ -187,6 +188,11 @@ export default function App() {
   const [electionContests, setElectionContests] = useState<ElectionContest[]>([]);
   const [isElectionSubmitting, setIsElectionSubmitting] = useState<boolean>(false);
   const [electionError, setElectionError] = useState<string | null>(null);
+  /** Candidato escolhido na vitrine, para o modal abrir ja com a aposta. */
+  const [electionInitialPick, setElectionInitialPick] = useState<{
+    contestId: string;
+    candidateId: string;
+  } | null>(null);
 
   /**
  * Partidas vem do Supabase.
@@ -256,6 +262,12 @@ export default function App() {
       setElectionContests([]);
     }
   }, []);
+
+  const handleOpenElectionBet = (contestId: string, candidateId: string) => {
+    setElectionInitialPick({ contestId, candidateId });
+    setElectionError(null);
+    setIsElectionModalOpen(true);
+  };
 
   const handlePlaceElectionBet = async (
     contest: ElectionContest,
@@ -1080,21 +1092,31 @@ export default function App() {
             </div>
           )}
 
-          {/* Active Live Match Tracker Showcase (If there's an active live match) */}
-          {activeTrackerMatch && activeTrackerMatch.sport !== 'politics' && (
-            <LivePitchTracker match={activeTrackerMatch} />
-          )}
+          {/* Mercado eleitoral: vitrine de fato, nao so banner e modal */}
+          {selectedSport === 'politics' ? (
+            <ElectionShowcase
+              contests={electionContests}
+              onPick={handleOpenElectionBet}
+            />
+          ) : (
+            <>
+              {/* Active Live Match Tracker Showcase (If there's an active live match) */}
+              {activeTrackerMatch && (
+                <LivePitchTracker match={activeTrackerMatch} />
+              )}
 
-          {/* Matches List Grid */}
-          <MatchList
-            matches={filteredMatches}
-            selectedSelections={selections}
-            onToggleSelection={handleToggleSelection}
-            onOpenMatchDetails={(m) => setDetailMatch(m)}
-            onSelectLiveTrackerMatch={(m) => setActiveTrackerMatchId(m.id)}
-            activeTrackerMatchId={activeTrackerMatch?.id}
-            oddsFormat={oddsFormat}
-          />
+              {/* Matches List Grid */}
+              <MatchList
+                matches={filteredMatches}
+                selectedSelections={selections}
+                onToggleSelection={handleToggleSelection}
+                onOpenMatchDetails={(m) => setDetailMatch(m)}
+                onSelectLiveTrackerMatch={(m) => setActiveTrackerMatchId(m.id)}
+                activeTrackerMatchId={activeTrackerMatch?.id}
+                oddsFormat={oddsFormat}
+              />
+            </>
+          )}
         </div>
 
         {/* Right Sidebar: Bet Slip & Cash Out */}
@@ -1233,8 +1255,10 @@ export default function App() {
         onClose={() => {
           setIsElectionModalOpen(false);
           setElectionError(null);
+          setElectionInitialPick(null);
         }}
         contests={electionContests}
+        initialPick={electionInitialPick}
         error={electionError}
         isSubmitting={isElectionSubmitting}
         walletBalance={wallet.realBalance + wallet.bonusBalance}

@@ -75,6 +75,35 @@ export interface PixMerchantConfig {
 }
 
 /**
+ * CRC16-CCITT (polinomio 0x1021, valor inicial 0xFFFF) do campo 63 do BRCode.
+ *
+ * O BRCode exige checksum correto: qualquer banco que le o codigo valida o CRC
+ * antes de aceitar a cobranca. Um valor fixo so eh valido para UM payload; era
+ * exatamente isso que fazia todo QR gerado aqui ser recusado como "invalido".
+ */
+export function crc16(input: string): string {
+  let crc = 0xffff;
+  for (let i = 0; i < input.length; i++) {
+    crc ^= input.charCodeAt(i) << 8;
+    for (let bit = 0; bit < 8; bit++) {
+      crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+    }
+  }
+  return crc.toString(16).toUpperCase().padStart(4, '0');
+}
+
+/**
+ * txid do BRCode (campo 62/05): so [A-Z0-9], de 6 a 25 caracteres. O padrão
+ * rejeita simbolos como "-"; valores fora do formato fazem o banco recusar o
+ * QR no mesmo check de validade do CRC.
+ */
+export function sanitizePixTxid(raw: string): string {
+  const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (clean.length >= 6) return clean.slice(0, 25);
+  return `PRIMAS${clean}`.slice(0, 25);
+}
+
+/**
  * Generates an authentic EMV compliant PIX Copia e Cola string.
  *
  * Os dados do recebedor vem de `config` (configurados no painel admin); sem
@@ -93,6 +122,7 @@ export const generatePixCode = (
     (config?.merchantName && config.merchantName.trim()) || 'PRIMASBET PAGAMENTOS S.A.';
   const merchantCity =
     (config?.merchantCity && config.merchantCity.trim()) || 'SAO PAULO';
+  const safeTxid = sanitizePixTxid(txid);
 
   // Embrulhos EMV: 0X + tamanho (2 digitos) + valor
   const wrap = (id: string, value: string): string =>
@@ -102,7 +132,7 @@ export const generatePixCode = (
   const pixAccount = wrap('00', 'br.gov.bcb.pix') + wrap('01', merchantKey);
 
   // Amount e o campo 54; padrao pede decimal separado por "." (como veio toFixed).
-  const payload =
+  const body =
     '000201' +
     wrap('26', pixAccount) +
     wrap('52', '0000') +
@@ -111,10 +141,10 @@ export const generatePixCode = (
     wrap('58', 'BR') +
     wrap('59', merchantName.slice(0, 25)) +
     wrap('60', merchantCity.slice(0, 15)) +
-    wrap('62', wrap('05', txid)) +
-    '6304E8A2';
+    wrap('62', wrap('05', safeTxid));
 
-  return payload;
+  // O CRC cobre tudo, inclusive a tag "63" e o "04" de tamanho.
+  return `${body}6304${crc16(`${body}6304`)}`;
 };
 
 /**

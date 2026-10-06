@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   X,
   ShieldCheck,
@@ -25,6 +25,8 @@ interface ElectionOfficialModalProps {
   isOpen: boolean;
   onClose: () => void;
   contests: ElectionContest[];
+  /** Candidato escolhido na vitrine; o modal abre pronto para apostar nele. */
+  initialPick?: { contestId: string; candidateId: string } | null;
   /** Mensagem de erro da ultima tentativa de aposta, se houver. */
   error?: string | null;
   isSubmitting: boolean;
@@ -48,6 +50,7 @@ export const ElectionOfficialModal: React.FC<ElectionOfficialModalProps> = ({
   isOpen,
   onClose,
   contests,
+  initialPick,
   error,
   isSubmitting,
   walletBalance,
@@ -60,6 +63,17 @@ export const ElectionOfficialModal: React.FC<ElectionOfficialModalProps> = ({
   const [stateCode, setStateCode] = useState<string>('');
   const [picked, setPicked] = useState<{ contestId: string; candidateId: string } | null>(null);
   const [stake, setStake] = useState<string>('');
+
+  // Vindo da vitrine, o modal abre com escopo/estado/candidato ja escolhidos.
+  useEffect(() => {
+    if (!isOpen || !initialPick) return;
+    const contest = contests.find(c => c.id === initialPick.contestId);
+    if (!contest) return;
+    setScope(contest.scope);
+    setStateCode(contest.stateCode ?? '');
+    setPicked({ contestId: contest.id, candidateId: initialPick.candidateId });
+    setStake('');
+  }, [isOpen, initialPick, contests]);
 
   const byScope = useMemo(() => contests.filter(c => c.scope === scope), [contests, scope]);
 
