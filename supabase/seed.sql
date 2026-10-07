@@ -1,0 +1,5 @@
+-- Seed vazio de proposito.
+-- O baseline do schema (tabelas do produto legado) vem de supabase/tests/schema_stub.sql,
+-- aplicado manualmente como 0000 no stack local (o CLI nao consegue criar no schema auth).
+-- Os seeds de dados (eleicoes, settings, sync de esportes) sao feitos pelas migrations
+-- 0003/0005/0006 ou pelo sync-sports. Nada a semear aqui.
