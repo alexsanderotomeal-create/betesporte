@@ -7,7 +7,13 @@
  *
  *   npm run test:pix
  */
-import { crc16, generatePixCode, sanitizePixTxid } from '../src/services/paymentService';
+import {
+  crc16,
+  generatePixCode,
+  isValidCnpj,
+  isValidCpf,
+  sanitizePixTxid,
+} from '../src/services/paymentService';
 
 const failures: string[] = [];
 const check = (ok: boolean, label: string) => {
@@ -44,7 +50,7 @@ check(parseOk, 'parse dos campos');
 check(code.slice(i, i + 2) === '63' && code.slice(i + 2, i + 4) === '04', 'campo 63/04 ausente');
 
 check(fields.get('00') === '01', 'campo 00 (payload format indicator) != 01');
-check(fields.get('26')?.startsWith('0014br.gov.bcb.pix01') === true, 'campo 26 sem GUI br.gov.bcb.pix');
+check(fields.get('26')?.startsWith('0014BR.GOV.BCB.PIX01') === true, 'campo 26 sem GUI BR.GOV.BCB.PIX');
 check(
   fields.get('26')?.endsWith('11111111-2222-4333-8444-555555555555') === true,
   'campo 26 nao contem a chave PIX'
@@ -59,6 +65,53 @@ const txid = fields.get('62')?.slice(4) ?? '';
 check(txid.length >= 6 && txid.length <= 25, 'txid fora de 6..25 caracteres');
 check(/^[A-Z0-9]+$/.test(txid), `txid com caractere invalido: ${txid}`);
 check(sanitizePixTxid('PIX-88838494') === 'PIX88838494', 'sanitizePixTxid quebrou o txid');
+
+// Telefone: o DICT armazena +55+DDD+numero; sem o "+" no payload o banco
+// responde "chave nao existe" mesmo com a chave certa.
+const phoneCode = generatePixCode(50, 'PIX-88838494', {
+  merchantKey: '87998092910',
+  merchantKeyType: 'auto',
+  merchantName: 'Cristian Nunes Macena',
+  merchantCity: 'SAO PAULO',
+});
+check(phoneCode.includes('0114+5587998092910'), 'telefone auto nao virou +55 + DDD + numero');
+
+const phoneAlready = generatePixCode(50, 'PIX-88838494', {
+  merchantKey: '+55 (87) 99809-2910',
+  merchantKeyType: 'auto',
+});
+check(phoneAlready.includes('0114+5587998092910'), 'telefone ja com +55 foi alterado');
+
+// CPF/CNPJ nao podem receber 55 na frente: a deteccao usa os digitos
+// verificadores para separar de telefone (mesmos 11 digitos).
+const cpfCode = generatePixCode(50, 'PIX-88838494', {
+  merchantKey: '111.444.777-35',
+  merchantKeyType: 'auto',
+});
+check(cpfCode.includes('011111144477735'), 'CPF foi corrompido como telefone');
+check(isValidCpf('11144477735') && !isValidCpf('11144477736'), 'isValidCpf modulo 11');
+
+const cnpjCode = generatePixCode(50, 'PIX-88838494', {
+  merchantKey: '11.222.333/0001-81',
+  merchantKeyType: 'auto',
+});
+check(cnpjCode.includes('011411222333000181'), 'CNPJ foi corrompido como telefone');
+check(isValidCnpj('11222333000181') && !isValidCnpj('11222333000182'), 'isValidCnpj modulo 11');
+
+// Payload com os dados reais do teste do usuario (chave de telefone, cidade
+// e nome do banco): conferir a estrutura campo a campo do comeco ao fim.
+const realCode = generatePixCode(50, 'PIX-99998888', {
+  merchantKey: '87998092910',
+  merchantKeyType: 'auto',
+  merchantName: 'Cristian Nunes Macena',
+  merchantCity: 'SAO PAULO',
+});
+check(realCode.startsWith('00020126'), 'real: header EMV');
+check(
+  realCode.includes('520400005303986540550.005802BR5921Cristian Nunes Macena6009SAO PAULO'),
+  'real: campos 52..60 como no banco'
+);
+check(realCode.endsWith(crc16(realCode.slice(0, -4))), 'real: CRC16 nao confere');
 
 // Codigos default (sem config do admin) nao podem ser usados: a chave
 // financeiro@primasbet.bet.br nao existe em banco nenhum.

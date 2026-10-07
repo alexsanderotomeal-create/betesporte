@@ -1206,13 +1206,31 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-slate-300 font-semibold block mb-1">
+                    Tipo da chave:
+                  </label>
+                  <select
+                    value={settingsForm.pixKeyType}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, pixKeyType: e.target.value })}
+                    className="w-full bg-[#161b22] border border-[#30363d] focus:border-[#00e701] rounded-xl px-3 py-2 text-white font-mono focus:outline-none"
+                  >
+                    <option value="auto">Auto (detectar)</option>
+                    <option value="random">Aleatória (EVP)</option>
+                    <option value="phone">Telefone</option>
+                    <option value="email">E-mail</option>
+                    <option value="cpf">CPF</option>
+                    <option value="cnpj">CNPJ</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">
                     Chave PIX do recebedor:
                   </label>
                   <input
                     type="text"
                     value={settingsForm.pixKey}
                     onChange={(e) => setSettingsForm({ ...settingsForm, pixKey: e.target.value })}
-                    placeholder="email@banco.com.br"
+                    placeholder="email@banco.com.br ou (87) 99809-2910"
                     className="w-full bg-[#161b22] border border-[#30363d] focus:border-[#00e701] rounded-xl px-3 py-2 text-white font-mono focus:outline-none"
                   />
                 </div>

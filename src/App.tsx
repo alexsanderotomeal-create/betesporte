@@ -1311,6 +1311,7 @@ export default function App() {
         currentUser={currentUser}
         pixConfig={{
           merchantKey: houseSettings.pixKey,
+          merchantKeyType: houseSettings.pixKeyType,
           merchantName: houseSettings.pixMerchantName,
           merchantCity: houseSettings.pixMerchantCity,
         }}

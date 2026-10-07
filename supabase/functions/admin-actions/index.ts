@@ -286,6 +286,10 @@ Deno.serve(async (req: Request) => {
       if (typeof settings.maintenanceMode === 'boolean') {
         patch.maintenance_mode = String(settings.maintenanceMode);
       }
+      if (typeof settings.pixKeyType === 'string' &&
+        ['auto', 'random', 'phone', 'email', 'cpf', 'cnpj'].includes(settings.pixKeyType)) {
+        patch.pix_key_type = settings.pixKeyType;
+      }
       if (typeof settings.pixKey === 'string' && settings.pixKey.trim()) {
         patch.pix_key = settings.pixKey.trim();
       }

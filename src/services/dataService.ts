@@ -608,6 +608,7 @@ export const DEFAULT_HOUSE_SETTINGS: HouseSettings = {
   autoApproveThreshold: 100,
   houseMarginPercent: 5,
   maintenanceMode: false,
+  pixKeyType: 'auto',
   pixKey: 'financeiro@primasbet.bet.br',
   pixMerchantName: 'PRIMASBET PAGAMENTOS S.A.',
   pixMerchantCity: 'SAO PAULO',
@@ -634,6 +635,7 @@ export async function fetchHouseSettings(): Promise<HouseSettings> {
       'welcome_bonus_percent',
       'house_margin',
       'maintenance_mode',
+      'pix_key_type',
       'pix_key',
       'pix_merchant_name',
       'pix_merchant_city',
@@ -669,6 +671,7 @@ export async function fetchHouseSettings(): Promise<HouseSettings> {
     // O banco guarda a margem como overround (1.05); a UI fala em percentual (5).
     houseMarginPercent: overround * 100 - 100,
     maintenanceMode: readBool('maintenance_mode', false),
+    pixKeyType: settings.get('pix_key_type') || DEFAULT_HOUSE_SETTINGS.pixKeyType,
     pixKey: settings.get('pix_key') || DEFAULT_HOUSE_SETTINGS.pixKey,
     pixMerchantName:
       settings.get('pix_merchant_name') || DEFAULT_HOUSE_SETTINGS.pixMerchantName,

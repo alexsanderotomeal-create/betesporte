@@ -62,6 +62,8 @@ export interface HouseSettings {
   autoApproveThreshold: number;
   houseMarginPercent: number;
   maintenanceMode: boolean;
+  /** Tipo da chave PIX no QR de deposito: auto/random/phone/email/cpf/cnpj. */
+  pixKeyType: string;
   /** Chave PIX que os clientes veem no QR de deposito. Vem de system_settings. */
   pixKey: string;
   /** Nome do recebedor exibido no PIX (limitado a 25 chars pelo EMV). */
