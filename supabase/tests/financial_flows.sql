@@ -684,6 +684,22 @@ exception
     end if;
 end $$;
 
+\echo '--- 22. visitante (anon) le system_settings, senao o QR cai nos defaults'
+set role anon;
+do $$
+declare n integer;
+begin
+  select count(*) into n from public.system_settings;
+  if n = 0 then
+    raise exception 'FAIL: anon nao le nenhuma configuracao da casa';
+  end if;
+  if not exists (select 1 from public.system_settings where key = 'min_deposit') then
+    raise exception 'FAIL: anon nao le min_deposit (politica continua so para authenticated?)';
+  end if;
+  raise notice 'ok: anon le % configuracoes da casa (leitura publica)', n;
+end $$;
+reset role;
+
 reset role;
 reset test.local_uid;
 \echo '=== TODOS OS TESTES PASSARAM ==='
