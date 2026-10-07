@@ -258,7 +258,10 @@ interface EspnEvent {
 
 async function fetchScoreboard(sport: string, slug: string): Promise<EspnEvent[]> {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const url = `${ESPN_HOST}/${sport}/${encodeURIComponent(slug)}/scoreboard?dates=${today}`;
+  // O config guarda o esporte interno ('football'), mas o path da ESPN para
+  // futebol e 'soccer' — 'football/bra.1' responde 400. Basketball ja bate.
+  const espnSport = sport === 'football' ? 'soccer' : sport;
+  const url = `${ESPN_HOST}/${espnSport}/${encodeURIComponent(slug)}/scoreboard?dates=${today}`;
 
   // ESPN devolve 403 para o User-Agent padrao do Deno; um User-Agent de
   // navegador passa. Sem chave, sem cookie — so o feed publico.

@@ -50,7 +50,9 @@ const UA =
 
 async function fetchScoreboard(sport, slug) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${encodeURIComponent(slug)}/scoreboard?dates=${today}`;
+  // 'football' e o nome interno; o path da ESPN para futebol e 'soccer'.
+  const espnSport = sport === 'football' ? 'soccer' : sport;
+  const url = `https://site.api.espn.com/apis/site/v2/sports/${espnSport}/${encodeURIComponent(slug)}/scoreboard?dates=${today}`;
   const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } });
   if (!res.ok) {
     const t = await res.text().catch(() => '');
