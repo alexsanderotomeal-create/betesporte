@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   ShieldCheck,
@@ -63,7 +63,7 @@ interface AdminPanelPageProps {
   onToggleUserStatus: (userId: string) => void;
   onManualCreditUser: (userId: string, amount: number) => void;
   onSetUserRole: (userId: string, role: 'user' | 'admin') => void;
-  onSaveHouseSettings: (newSettings: HouseSettings) => void;
+  onSaveHouseSettings: (newSettings: HouseSettings) => Promise<boolean>;
   onSaveElectionOdd: (candidateId: string, odds: number) => Promise<void>;
   onSaveElectionContest?: (contest: ElectionContestDraftInput) => Promise<void>;
   onSaveElectionCandidate?: (candidate: ElectionCandidateDraftInput) => Promise<void>;
@@ -115,6 +115,14 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
   const [settingsForm, setSettingsForm] = useState<HouseSettings>(houseSettings);
   const [settingsSuccess, setSettingsSuccess] = useState<boolean>(false);
 
+  // O form nasce como snapshot do mount: se a carga das configuracoes atrasar
+  // ou falhar, ele fica com os defaults enquanto o banco tem os valores reais —
+  // e salvar nesse estado apagaria a chave PIX de todo mundo. Resincroniza
+  // sempre que a prop muda (carga inicial e recarga apos salvar).
+  useEffect(() => {
+    setSettingsForm(houseSettings);
+  }, [houseSettings]);
+
   // Editor de mercados eleitorais (nome, partido, intencao, poll, odd)
   interface CandidateDraft {
     name: string;
@@ -150,8 +158,12 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
       u.cpf.includes(searchUser)
   );
 
-  const handleSaveSettings = () => {
-    onSaveHouseSettings(settingsForm);
+  const handleSaveSettings = async () => {
+    // Sucesso so aparece se o servidor confirmou: antes o painel mostrava
+    // "salvo!" mesmo quando a Edge Function retornou erro, e o operador
+    // concluia que os dados tinham sido resetados.
+    const saved = await onSaveHouseSettings(settingsForm);
+    if (!saved) return;
     setSettingsSuccess(true);
     setTimeout(() => setSettingsSuccess(false), 2500);
   };

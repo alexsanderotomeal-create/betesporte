@@ -477,11 +477,35 @@ export default function App() {
   }, [loadAccountData]);
 
   // House settings sao publicas e independem de sessao.
+  //
+  // Uma leitura que falha NUNCA troca a configuracao pelos defaults: o QR de
+  // deposito sairia com a chave default `financeiro@...`, que nao existe em
+  // banco nenhum (o cliente ve "chave nao existe"), e o painel mostraria
+  // valores que nao sao os do banco — parecendo que os dados foram resetados.
+  // Em erro, mantem o ultimo valor conhecido e tenta de novo em seguida.
   useEffect(() => {
     if (!isSupabaseConfigured) return;
-    fetchHouseSettings()
-      .then(setHouseSettings)
-      .catch(() => setHouseSettings(DEFAULT_HOUSE_SETTINGS));
+    let cancelled = false;
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const load = () => {
+      fetchHouseSettings()
+        .then((settings) => {
+          if (!cancelled) setHouseSettings(settings);
+        })
+        .catch(() => {
+          if (cancelled || attempt >= 5) return;
+          attempt += 1;
+          timer = setTimeout(load, 3000);
+        });
+    };
+    load();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   // REAL-TIME ENGINE LOOP: Dynamic odds ticker and game minute advancements
@@ -910,12 +934,14 @@ export default function App() {
     await refreshBets(electionContests);
   };
 
-  const handleSaveHouseSettings = async (newSettings: HouseSettings) => {
+  const handleSaveHouseSettings = async (newSettings: HouseSettings): Promise<boolean> => {
     try {
       await adminActions.saveHouseSettings({ ...newSettings });
       setHouseSettings(await fetchHouseSettings());
+      return true;
     } catch (err) {
       setToast(toastMessage(err, 'Nao foi possivel salvar as configuracoes.'));
+      return false;
     }
   };
 
