@@ -29,6 +29,7 @@ import {
   DEFAULT_HOUSE_SETTINGS,
   createDepositRequest,
   createWithdrawRequest,
+  fetchAllBets,
   fetchAllDeposits,
   fetchAllProfiles,
   fetchAllWithdrawals,
@@ -74,63 +75,6 @@ import { ElectionShowcase } from './components/ElectionShowcase';
 import { ShieldCheck } from 'lucide-react';
 import { ElectionContest, ElectionCandidate, ELECTION_SCOPE_LABEL } from './types/election';
 
-const INITIAL_TICKETS: BetTicket[] = [
-  {
-    id: 'tkt-open-101',
-    date: 'Hoje, 16:45',
-    type: 'single',
-    selections: [
-      {
-        matchId: 'match-fla-pal',
-        matchTitle: 'Flamengo vs Palmeiras',
-        homeTeam: 'Flamengo',
-        awayTeam: 'Palmeiras',
-        league: 'Brasileirão Série A',
-        sport: 'football',
-        isLive: true,
-        minute: 74,
-        marketId: 'm-1x2',
-        marketName: 'Resultado Final (1X2)',
-        choiceId: '1',
-        choiceLabel: 'Flamengo',
-        odd: 2.35,
-        initialOdd: 2.35,
-      },
-    ],
-    totalOdd: 2.35,
-    stake: 50.00,
-    potentialReturn: 117.50,
-    status: 'OPEN',
-    cashoutValue: 68.50,
-  },
-  {
-    id: 'tkt-won-102',
-    date: 'Hoje, 14:10',
-    type: 'single',
-    selections: [
-      {
-        matchId: 'match-cor-sao',
-        matchTitle: 'Corinthians vs São Paulo',
-        homeTeam: 'Corinthians',
-        awayTeam: 'São Paulo',
-        league: 'Brasileirão Série A',
-        sport: 'football',
-        isLive: false,
-        marketId: 'm-1x2',
-        marketName: 'Resultado Final (1X2)',
-        choiceId: '1',
-        choiceLabel: 'Corinthians',
-        odd: 1.85,
-        initialOdd: 1.85,
-      },
-    ],
-    totalOdd: 1.85,
-    stake: 80.00,
-    potentialReturn: 148.00,
-    status: 'WON',
-  },
-];
-
 export default function App() {
   // Main sports & betting states
   const [matches, setMatches] = useState<Match[]>(INITIAL_MATCHES);
@@ -146,6 +90,8 @@ export default function App() {
   const [wallet, setWallet] = useState<UserWallet>({ realBalance: 0, bonusBalance: 0, currency: 'BRL' });
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [depositRequests, setDepositRequests] = useState<DepositRequest[]>([]);
+  // Fila de liquidacao do painel admin: apostas de todos os usuarios.
+  const [adminBets, setAdminBets] = useState<BetTicket[]>([]);
   const [withdrawRequests, setWithdrawRequests] = useState<WithdrawRequest[]>([]);
   const [houseSettings, setHouseSettings] = useState<HouseSettings>(DEFAULT_HOUSE_SETTINGS);
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -300,6 +246,27 @@ export default function App() {
   }, [refreshBets, electionContests]);
 
   /**
+   * Mesmo caminho, porem sem filtro de usuario: a fila de liquidacao do
+   * backoffice mostra as apostas de todo mundo (policy de admin). Sessao de
+   * role=user nem tenta — a RLS devolveria so as proprias.
+   */
+  const refreshAdminBets = useCallback(async () => {
+    if (currentUser?.role !== 'admin') {
+      setAdminBets([]);
+      return;
+    }
+    try {
+      setAdminBets(await fetchAllBets(electionContests));
+    } catch {
+      // Sem rede ou consulta negada: mantem o que ja esta em tela.
+    }
+  }, [currentUser?.id, currentUser?.role, electionContests]);
+
+  useEffect(() => {
+    void refreshAdminBets();
+  }, [refreshAdminBets]);
+
+  /**
    * Clique no candidato da vitrine = mesmo gesto de clicar numa odd de jogo:
    * entra no boletim (e sai se clicar de novo), sem popup no meio do caminho.
    */
@@ -396,15 +363,6 @@ export default function App() {
       setIsSyncing(false);
     }
   };
-
-  // Save tickets to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('betesporte_tickets', JSON.stringify(tickets));
-    } catch {
-      // ignore
-    }
-  }, [tickets]);
 
   // Synchronize active live match for tracker
   const activeTrackerMatch = useMemo(() => {
@@ -506,6 +464,7 @@ export default function App() {
         setUsers([]);
         setDepositRequests([]);
         setWithdrawRequests([]);
+        setAdminBets([]);
         setIsAuthReady(true);
         return;
       }
@@ -582,23 +541,8 @@ export default function App() {
         });
       });
 
-      // Recalculate Cash Out on open tickets
-      setTickets((prevTickets) => {
-        return prevTickets.map((tkt) => {
-          if (tkt.status !== 'OPEN') return tkt;
-          // Random slight fluctuation in cashout value (between -2% and +3%)
-          const jitter = (Math.random() * 0.05 - 0.02);
-          const currentVal = tkt.cashoutValue || tkt.stake * 0.9;
-          const nextCashout = Math.min(
-            tkt.potentialReturn * 0.95,
-            Math.max(tkt.stake * 0.3, Number((currentVal * (1 + jitter)).toFixed(2)))
-          );
-          return {
-            ...tkt,
-            cashoutValue: nextCashout,
-          };
-        });
-      });
+      // Cash out nao tem liquidacao antecipada no servidor: sem ela nao existe
+      // valor de encerramento a estimativa aqui — e a UI nem oferece o botao.
     }, intervalTime);
 
     return () => clearInterval(interval);
@@ -784,17 +728,6 @@ export default function App() {
     return true;
   };
 
-  /**
-   * Cash out desativado.
-   *
-   * O valor de cash out e uma estimativa do motor de odds. Pagar sem uma Edge
-   * Function permitiria pedir o cash out de uma aposta ja liquidada e receber
-   * duas vezes. Fica bloqueado ate existir a liquidacao antecipada no servidor.
-   */
-  const handleCashOut = (_ticketId: string, _amount: number) => {
-    setToast('Cash out indisponivel: a liquidacao antecipada ainda nao foi integrada ao servidor.');
-  };
-
   // Payment Handlers
   // Saldo e extrato sao relidos do banco depois da operacao. Somar no cliente
   // duplicaria o valor que a transacao no Postgres ja aplicou.
@@ -831,6 +764,7 @@ export default function App() {
     setUsers([]);
     setDepositRequests([]);
     setWithdrawRequests([]);
+    setAdminBets([]);
   };
 
   // Alterar limite diario e mudanca de privilegio: a RLS bloqueia para o
@@ -938,6 +872,42 @@ export default function App() {
     } catch (err) {
       setToast(toastMessage(err, 'Nao foi possivel creditar o saldo.'));
     }
+  };
+
+  /**
+   * Liquidacao de aposta.
+   *
+   * O pagamento (debito de volta no wallet + lancada no extrato) acontece na
+   * RPC do servidor, chamada pela Edge Function com service_role. Aqui a tela
+   * so escolhe o resultado e relee as duas listas: a do painel e o boletim do
+   * proprio admin, caso ele esteja liquidando a propria aposta.
+   */
+  const handleSettleBet = async (betId: string, result: 'WON' | 'LOST' | 'VOID') => {
+    const bet = adminBets.find((b) => b.id === betId);
+    if (!bet) return;
+
+    try {
+      await adminActions.settleBet(
+        betId,
+        result,
+        // Ganhou paga o retorno prometido (ja sai com o bonus de multipla);
+        // perdida e anulada a RPC resolve sem valor na chamada.
+        result === 'WON' ? bet.potentialReturn : undefined
+      );
+    } catch (err) {
+      setToast(toastMessage(err, 'Nao foi possivel liquidar a aposta.'));
+      return;
+    }
+
+    setToast(
+      result === 'WON'
+        ? 'Aposta liquidada como ganha.'
+        : result === 'LOST'
+        ? 'Aposta liquidada como perdida.'
+        : 'Aposta anulada: stake devolvida.'
+    );
+    await refreshAdminBets();
+    await refreshBets(electionContests);
   };
 
   const handleSaveHouseSettings = async (newSettings: HouseSettings) => {
@@ -1121,6 +1091,7 @@ export default function App() {
       <AdminPanelPage
         currentAdminId={currentUser.id}
         users={users}
+        bets={adminBets}
         depositRequests={depositRequests}
         withdrawRequests={withdrawRequests}
         houseSettings={houseSettings}
@@ -1138,6 +1109,7 @@ export default function App() {
         onSaveElectionCandidate={handleSaveElectionCandidate}
         onDeleteElectionCandidate={handleDeleteElectionCandidate}
         onDeleteElectionContest={handleDeleteElectionContest}
+        onSettleBet={handleSettleBet}
         onBack={() => setAdminViewOpen(false)}
         isSyncing={isSyncing}
         onTriggerSync={handleTriggerSync}
@@ -1250,7 +1222,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Right Sidebar: Bet Slip & Cash Out */}
+        {/* Right Sidebar: Bet Slip */}
         <BetSlip
           selections={selections}
           onRemoveSelection={handleRemoveSelection}
@@ -1261,7 +1233,6 @@ export default function App() {
           onPlaceBet={handlePlaceBet}
           tickets={tickets}
           focusSignal={slipFocus}
-          onCashOut={handleCashOut}
           onOpenDeposit={() => {
             if (!currentUser) {
               setAuthInitialMode('login');

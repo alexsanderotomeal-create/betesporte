@@ -102,6 +102,8 @@ export interface BetSelection {
 
 export interface BetTicket {
   id: string;
+  /** Somente na leitura do painel admin: de quem e a aposta. */
+  userId?: string;
   date: string;
   type: 'single' | 'multiple';
   selections: BetSelection[];

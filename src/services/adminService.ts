@@ -21,13 +21,16 @@ export type AdminAction =
   | 'upsert_election_contest'
   | 'save_election_candidate'
   | 'delete_election_candidate'
-  | 'delete_election_contest';
+  | 'delete_election_contest'
+  | 'settle_bet';
 
 export interface AdminActionBody {
   requestId?: string;
   userId?: string;
   candidateId?: string;
   contestId?: string;
+  betId?: string;
+  result?: 'WON' | 'LOST' | 'VOID';
   odds?: number;
   amount?: number;
   status?: 'active' | 'blocked';
@@ -108,4 +111,11 @@ export const adminActions = {
     invokeAdminAction('delete_election_candidate', { candidateId }),
   deleteElectionContest: (contestId: string) =>
     invokeAdminAction('delete_election_contest', { contestId }),
+  /**
+   * Liquida uma aposta aberta. O valor de `amount` e o retorno de
+   * bets.potential_return (a tela so confirma); LOST e VOID nao pagam escolha:
+   * a RPC zera o perdedor e faz a anulacao devolver a stake.
+   */
+  settleBet: (betId: string, result: 'WON' | 'LOST' | 'VOID', amount?: number) =>
+    invokeAdminAction('settle_bet', { betId, result, amount }),
 };

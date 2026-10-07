@@ -37,11 +37,14 @@ interface ActionPayload {
     | 'upsert_election_contest'
     | 'save_election_candidate'
     | 'delete_election_candidate'
-    | 'delete_election_contest';
+    | 'delete_election_contest'
+    | 'settle_bet';
   requestId?: string;
   userId?: string;
   candidateId?: string;
   contestId?: string;
+  betId?: string;
+  result?: 'WON' | 'LOST' | 'VOID';
   odds?: number;
   amount?: number;
   status?: 'active' | 'blocked';
@@ -497,6 +500,32 @@ Deno.serve(async (req: Request) => {
       const { error } = await admin.from('election_contests').delete().eq('id', contestId);
       if (error) return json({ error: error.message }, 500);
       return json({ success: true, contestId });
+    }
+
+    /**
+     * Liquidacao de aposta. A RPC e quem paga: debita o wallet, grava o ledger
+     * e so aceita aposta ainda OPEN. VOID devolve a stake por conta propria e
+     * LOST zera o retorno, entao os dois valem null aqui.
+     */
+    case 'settle_bet': {
+      const { betId, result, amount } = payload;
+      if (!betId) return json({ error: 'betId obrigatorio.' }, 400);
+      if (result !== 'WON' && result !== 'LOST' && result !== 'VOID') {
+        return json({ error: 'Resultado invalido: use WON, LOST ou VOID.' }, 400);
+      }
+      if (result === 'WON' && (typeof amount !== 'number' || amount <= 0)) {
+        return json({ error: 'amount positivo obrigatorio para WON.' }, 400);
+      }
+
+      const { error } = await admin.rpc('settle_bet_atomic', {
+        p_bet_id: betId,
+        p_status: result,
+        p_return: result === 'WON' ? amount : null,
+        p_reviewer_id: reviewerId,
+      });
+
+      if (error) return json({ error: error.message }, 409);
+      return json({ success: true, betId, result });
     }
 
     default:

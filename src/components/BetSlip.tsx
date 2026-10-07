@@ -6,7 +6,6 @@ import {
   CheckCircle2, 
   Clock, 
   TrendingUp, 
-  DollarSign, 
   Sparkles,
   ChevronDown,
   ChevronUp,
@@ -26,7 +25,6 @@ interface BetSlipProps {
   wallet: UserWallet;
   onPlaceBet: (stake: number, type: 'single' | 'multiple', selections: BetSelection[]) => Promise<boolean>;
   tickets: BetTicket[];
-  onCashOut: (ticketId: string, amount: number) => void;
   onOpenDeposit: () => void;
   isMobileOpen: boolean;
   onToggleMobile: () => void;
@@ -45,7 +43,6 @@ export const BetSlip: React.FC<BetSlipProps> = ({
   wallet,
   onPlaceBet,
   tickets,
-  onCashOut,
   onOpenDeposit,
   isMobileOpen,
   onToggleMobile,
@@ -54,7 +51,6 @@ export const BetSlip: React.FC<BetSlipProps> = ({
   focusSignal,
 }) => {
   const [activeTab, setActiveTab] = useState<'slip' | 'my_bets'>('slip');
-  const [betType, setBetType] = useState<'single' | 'multiple'>('multiple');
   const [stake, setStake] = useState<string>('20');
   const [lastPlacedTicket, setLastPlacedTicket] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -71,7 +67,8 @@ export const BetSlip: React.FC<BetSlipProps> = ({
   const totalOdd = selections.reduce((acc, sel) => acc * sel.odd, 1);
   const formattedTotalOdd = totalOdd > 0 ? totalOdd.toFixed(2) : '1.00';
 
-  // Multiplier Combo Bonus calculation
+  // Multiplier Combo Bonus calculation — a mesma escada que o banco aplica em
+  // place_bet_atomic (migration 0009), para o retorno da tela ser o pago.
   let bonusPercentage = 0;
   if (selections.length === 2) bonusPercentage = 5;
   else if (selections.length === 3) bonusPercentage = 10;
@@ -108,7 +105,9 @@ export const BetSlip: React.FC<BetSlipProps> = ({
     try {
       const success = await onPlaceBet(
         numStake,
-        selections.length > 1 ? betType : 'single',
+        // Com 2+ selecoes as odds sao multiplicadas no banco, entao a aposta e
+        // combo — o tipo e uma consequencia da contagem, nao uma escolha.
+        selections.length > 1 ? 'multiple' : 'single',
         selections
       );
       if (!success) return;
@@ -216,32 +215,6 @@ export const BetSlip: React.FC<BetSlipProps> = ({
         {/* TAB 1: BET SLIP */}
         {activeTab === 'slip' && (
           <div className="flex flex-col flex-1 overflow-hidden">
-            {/* Bet Mode Selector: Simples vs Múltipla */}
-            {selections.length > 1 && !hasElection && (
-              <div className="px-3 pt-2.5 pb-1 flex items-center gap-1">
-                <button
-                  onClick={() => setBetType('multiple')}
-                  className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
-                    betType === 'multiple'
-                      ? 'bg-[#00e701] text-black shadow'
-                      : 'bg-[#161b22] text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Múltipla / Combo
-                </button>
-                <button
-                  onClick={() => setBetType('single')}
-                  className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
-                    betType === 'single'
-                      ? 'bg-[#00e701] text-black shadow'
-                      : 'bg-[#161b22] text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Simples
-                </button>
-              </div>
-            )}
-
             {/* Selections Scroll Area */}
             <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5 max-h-[380px]">
               {selections.length === 0 ? (
@@ -431,7 +404,7 @@ export const BetSlip: React.FC<BetSlipProps> = ({
           </div>
         )}
 
-        {/* TAB 2: MY BETS & CASH OUT */}
+        {/* TAB 2: MY BETS */}
         {activeTab === 'my_bets' && (
           <div className="flex flex-col flex-1 overflow-y-auto p-3 gap-3 max-h-[500px]">
             {tickets.length === 0 ? (
@@ -439,7 +412,7 @@ export const BetSlip: React.FC<BetSlipProps> = ({
                 <Clock className="w-10 h-10 mx-auto text-slate-600 mb-2" />
                 <h4 className="text-xs font-bold text-slate-300">Nenhuma aposta ativa</h4>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Seus bilhetes finalizados e opções de Cash Out aparecerão aqui em tempo real.
+                  Seus bilhetes em aberto e finalizados aparecerão aqui em tempo real.
                 </p>
               </div>
             ) : (
@@ -502,22 +475,9 @@ export const BetSlip: React.FC<BetSlipProps> = ({
                       </div>
                     </div>
 
-                    {/* Cash Out Button if Open */}
-                    {isOpen && ticket.cashoutValue && ticket.cashoutValue > 0 && (
-                      <button
-                        onClick={() => onCashOut(ticket.id, ticket.cashoutValue!)}
-                        className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold text-xs flex items-center justify-between transition-transform active:scale-[0.98] shadow-sm cursor-pointer"
-                      >
-                        <span className="flex items-center gap-1">
-                          <DollarSign className="w-3.5 h-3.5 stroke-[3]" />
-                          Encerrar Aposta (Cash Out)
-                        </span>
-                        <span className="font-mono text-sm">
-                          R$ {ticket.cashoutValue.toFixed(2)}
-                        </span>
-                      </button>
-                    )}
-
+                    {/* Bilhete encerrado por cash out la no servidor: aqui so o
+                        aviso. O botao de encerramento depende de uma RPC de
+                        liquidacao antecipada que ainda nao existe. */}
                     {isCashed && ticket.cashedOutAmount && (
                       <div className="text-center text-[10px] text-sky-400 font-semibold bg-sky-950/40 p-1 rounded">
                         Encerrada com Cash Out de R$ {ticket.cashedOutAmount.toFixed(2)}

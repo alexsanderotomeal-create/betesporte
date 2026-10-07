@@ -1,4 +1,4 @@
--- Testes de aceitacao das migrations 0001/0002/0003 sobre o stub do banco REAL.
+-- Testes de aceitacao das migrations do projeto sobre o stub do banco REAL.
 -- Cada DO block lanca excecao se o invariante nao valer; com ON_ERROR_STOP=1
 -- qualquer falha derruba o psql com exit != 0.
 -- Resultados de RPC vao para temp tables: psql NAO interpola :vars em $$..$$.
@@ -537,6 +537,151 @@ begin
      and type in ('deposit','bonus');
   if n <> 3 then raise exception 'FAIL: lancamentos = % (esperado 3: dep, bonus, dep)', n; end if;
   raise notice 'ok: segundo deposito creditou so o principal (sem bonus repetido)';
+end $$;
+
+reset role;
+reset test.local_uid;
+
+\echo '--- 20. bonus de multipla: escada 5/10/15/25% aplicada pelo BANCO'
+insert into public.market_choices (id, market_id, label, odds)
+values ('eeeeeee1-0000-0000-0000-000000000003', 'ddddddd1-0000-0000-0000-000000000001', 'Over 2.5', 1.50),
+       ('eeeeeee1-0000-0000-0000-000000000004', 'ddddddd1-0000-0000-0000-000000000001', 'Ambas marcam', 2.00),
+       ('eeeeeee1-0000-0000-0000-000000000005', 'ddddddd1-0000-0000-0000-000000000001', 'Handicap -1', 1.80);
+
+set role authenticated;
+set test.local_uid = '11111111-1111-1111-1111-111111111111';
+
+do $$
+declare
+  c2 jsonb;
+  c3 jsonb;
+  c4 jsonb;
+  c5 jsonb;
+  b record;
+  w0 numeric;
+  w1 numeric;
+  n integer;
+begin
+  c2 := jsonb_build_array(
+    jsonb_build_object('choiceId', 'eeeeeee1-0000-0000-0000-000000000001'),
+    jsonb_build_object('choiceId', 'eeeeeee1-0000-0000-0000-000000000002'));
+  c3 := c2 || jsonb_build_array(jsonb_build_object('choiceId', 'eeeeeee1-0000-0000-0000-000000000003'));
+  c4 := c3 || jsonb_build_array(jsonb_build_object('choiceId', 'eeeeeee1-0000-0000-0000-000000000004'));
+  c5 := c4 || jsonb_build_array(jsonb_build_object('choiceId', 'eeeeeee1-0000-0000-0000-000000000005'));
+
+  select wallet_balance into w0 from public.wallet_balances
+   where user_id = '11111111-1111-1111-1111-111111111111';
+
+  -- 2 selecoes: 2.50 x 3.10 = 7.75 -> 10 x 7.75 = 77.50 -> +5% = 81.38
+  select * into b from public.place_bet_atomic('multiple', c2, 10);
+  if round(b.total_odds, 2) <> 7.75 then
+    raise exception 'FAIL: odd de 2 selecoes = % (esperado 7.75)', b.total_odds;
+  end if;
+  if b.potential_return <> 81.38 then
+    raise exception 'FAIL: retorno 2 selecoes = % (esperado 81.38 = 5%% de bonus)', b.potential_return;
+  end if;
+
+  -- 3 selecoes: 7.75 x 1.50 = 11.625 -> 116.25 -> +10% = 127.88
+  select * into b from public.place_bet_atomic('multiple', c3, 10);
+  if round(b.total_odds, 3) <> 11.625 then
+    raise exception 'FAIL: odd de 3 selecoes = % (esperado 11.625)', b.total_odds;
+  end if;
+  if b.potential_return <> 127.88 then
+    raise exception 'FAIL: retorno 3 selecoes = % (esperado 127.88 = 10%% de bonus)', b.potential_return;
+  end if;
+
+  -- 4 selecoes: 11.625 x 2.00 = 23.25 -> 232.50 -> +15% = 267.38
+  select * into b from public.place_bet_atomic('multiple', c4, 10);
+  if b.potential_return <> 267.38 then
+    raise exception 'FAIL: retorno 4 selecoes = % (esperado 267.38 = 15%% de bonus)', b.potential_return;
+  end if;
+
+  -- 5 selecoes (teto): 23.25 x 1.80 = 41.85 -> 418.50 -> +25% = 523.13
+  select * into b from public.place_bet_atomic('multiple', c5, 10);
+  if b.potential_return <> 523.13 then
+    raise exception 'FAIL: retorno 5 selecoes = % (esperado 523.13 = 25%% de bonus)', b.potential_return;
+  end if;
+
+  -- O tipo gravado tem que ser combo: a aposta com N>1 selecoes e multiple.
+  select count(*) into n from public.bets
+   where user_id = '11111111-1111-1111-1111-111111111111'
+     and type = 'multiple' and stake = 10
+     and status = 'OPEN' and placed_at > now() - interval '1 minute';
+  if n <> 4 then raise exception 'FAIL: combos gravados = % (esperado 4)', n; end if;
+
+  select wallet_balance into w1 from public.wallet_balances
+   where user_id = '11111111-1111-1111-1111-111111111111';
+  if w1 <> w0 - 40 then raise exception 'FAIL: debito dos 4 combos = % (esperado %)', w1, w0 - 40; end if;
+
+  raise notice 'ok: banco pagou 5/10/15/25%% (81.38, 127.88, 267.38, 523.13) e gravou type=multiple';
+end $$;
+
+\echo '--- 21. liquidacao com reviewer explicito (caminho da Edge Function)'
+reset role;
+reset test.local_uid;
+
+insert into public.bets (id, user_id, type, status, selections, total_odds, stake, potential_return)
+values ('ffffffff-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111',
+        'single', 'OPEN', '[]'::jsonb, 2.00, 5, 10),
+       ('ffffffff-0000-0000-0000-000000000003', '11111111-1111-1111-1111-111111111111',
+        'single', 'OPEN', '[]'::jsonb, 3.00, 4, 12);
+
+set role service_role;
+-- Sem test.local_uid: auth.uid() e NULL, como no service_role de verdade.
+-- O gate tem que validar o reviewer recebido, nao a sessao.
+do $$
+declare s numeric; w0 numeric; w1 numeric; b record;
+begin
+  select wallet_balance into w0 from public.wallet_balances
+   where user_id = '11111111-1111-1111-1111-111111111111';
+
+  select public.settle_bet_atomic('ffffffff-0000-0000-0000-000000000002', 'WON', 10,
+         '22222222-2222-2222-2222-222222222222') into s;
+
+  select status, actual_return into b from public.bets
+   where id = 'ffffffff-0000-0000-0000-000000000002';
+  if b.status <> 'WON' or b.actual_return <> 10 then
+    raise exception 'FAIL: liquidacao via reviewer: % / %', b.status, b.actual_return;
+  end if;
+
+  select wallet_balance into w1 from public.wallet_balances
+   where user_id = '11111111-1111-1111-1111-111111111111';
+  if w1 <> w0 + 10 then
+    raise exception 'FAIL: credito do ganho = % (esperado %)', w1, w0 + 10;
+  end if;
+
+  -- Anulacao devolve a stake sem o chamador escolher o valor.
+  select public.settle_bet_atomic('ffffffff-0000-0000-0000-000000000003', 'VOID', null,
+         '22222222-2222-2222-2222-222222222222') into s;
+
+  select status, actual_return into b from public.bets
+   where id = 'ffffffff-0000-0000-0000-000000000003';
+  if b.status <> 'VOID' or b.actual_return <> 4 then
+    raise exception 'FAIL: anulacao = % / % (esperado VOID / 4)', b.status, b.actual_return;
+  end if;
+
+  select wallet_balance into w1 from public.wallet_balances
+   where user_id = '11111111-1111-1111-1111-111111111111';
+  if w1 <> w0 + 14 then
+    raise exception 'FAIL: saldo apos ganho + anulacao = % (esperado %)', w1, w0 + 14;
+  end if;
+
+  raise notice 'ok: WON creditou 10 e VOID devolveu a stake de 4 com reviewer explicito';
+end $$;
+
+-- Reviewer que nao e admin nao liquida, mesmo com service_role.
+do $$
+begin
+  perform public.settle_bet_atomic('ffffffff-0000-0000-0000-000000000001', 'WON', 100,
+         '11111111-1111-1111-1111-111111111111');
+  raise exception 'FAIL: reviewer comum liquidou aposta';
+exception
+  when raise_exception then
+    if sqlerrm = 'Acesso restrito a administradores ativos' then
+      raise notice 'ok: reviewer nao-admin negado mesmo com service_role';
+    else
+      raise;
+    end if;
 end $$;
 
 reset role;

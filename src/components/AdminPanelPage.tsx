@@ -24,6 +24,7 @@ import {
   Save
 } from 'lucide-react';
 import { UserAccount, DepositRequest, WithdrawRequest, HouseSettings } from '../types/auth';
+import { BetTicket } from '../types/betting';
 import { ElectionContest } from '../types/election';
 
 export interface ElectionContestDraftInput {
@@ -49,6 +50,8 @@ export interface ElectionCandidateDraftInput {
 interface AdminPanelPageProps {
   currentAdminId?: string;
   users: UserAccount[];
+  /** Apostas de todos os usuarios, mais recentes primeiro (fila de liquidacao). */
+  bets: BetTicket[];
   depositRequests: DepositRequest[];
   withdrawRequests: WithdrawRequest[];
   houseSettings: HouseSettings;
@@ -66,6 +69,7 @@ interface AdminPanelPageProps {
   onSaveElectionCandidate?: (candidate: ElectionCandidateDraftInput) => Promise<void>;
   onDeleteElectionCandidate?: (candidateId: string) => Promise<void>;
   onDeleteElectionContest?: (contestId: string) => Promise<void>;
+  onSettleBet: (betId: string, result: 'WON' | 'LOST' | 'VOID') => void;
   onBack: () => void;
   isSyncing?: boolean;
   onTriggerSync?: () => void;
@@ -75,6 +79,7 @@ interface AdminPanelPageProps {
 export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
   currentAdminId,
   users,
+  bets,
   depositRequests,
   withdrawRequests,
   houseSettings,
@@ -92,15 +97,19 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
   onSaveElectionCandidate,
   onDeleteElectionCandidate,
   onDeleteElectionContest,
+  onSettleBet,
   onBack,
   isSyncing = false,
   onTriggerSync,
   onOpenApiSimulator,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'deposits' | 'withdrawals' | 'users' | 'settings' | 'elections'
+    'deposits' | 'withdrawals' | 'bets' | 'users' | 'settings' | 'elections'
   >('deposits');
   const [searchUser, setSearchUser] = useState<string>('');
+
+  // Confirmacao em dois cliques para liquidar: dinheiro nao se clica por engano.
+  const [settleConfirm, setSettleConfirm] = useState<string | null>(null);
 
   // Settings form state
   const [settingsForm, setSettingsForm] = useState<HouseSettings>(houseSettings);
@@ -128,6 +137,11 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
 
   const pendingDeposits = depositRequests.filter((d) => d.status === 'pending');
   const pendingWithdrawals = withdrawRequests.filter((w) => w.status === 'pending');
+  const openBets = bets.filter((b) => b.status === 'OPEN');
+  // Em aberto no topo; dentro de cada grupo mantem a ordem (mais recente antes).
+  const sortedBets = [...bets].sort(
+    (a, b) => Number(b.status === 'OPEN') - Number(a.status === 'OPEN')
+  );
 
   const filteredUsers = users.filter(
     (u) =>
@@ -460,6 +474,23 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('bets')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'bets'
+                ? 'bg-[#00e701] text-black shadow'
+                : 'text-slate-400 hover:text-white hover:bg-[#21262d]'
+            }`}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>Liquidar Apostas</span>
+            {openBets.length > 0 && (
+              <span className="px-1.5 py-0.2 bg-[#00e701] text-black font-extrabold rounded-full text-[10px] font-mono">
+                {openBets.length}
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => setActiveTab('users')}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
               activeTab === 'users'
@@ -750,7 +781,163 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
           </div>
         )}
 
-        {/* Tab 3: USERS MANAGEMENT */}
+        {/* Tab 3: BET SETTLEMENT */}
+        {activeTab === 'bets' && (
+          <div className="flex flex-col gap-3 text-xs">
+            <div className="flex items-center justify-between text-slate-400 pb-1">
+              <span>
+                Apostas de todos os usuarios. Confirmar o resultado faz o servidor
+                pagar (ou anular) e gravar no extrato do apostador.
+              </span>
+              <span className="font-mono text-[11px]">
+                {openBets.length} em aberto · {bets.length} no histórico
+              </span>
+            </div>
+
+            {bets.length === 0 ? (
+              <div className="py-12 text-center text-slate-500">
+                Nenhuma aposta registrada.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                {sortedBets.map((bet) => {
+                  const isOpen = bet.status === 'OPEN';
+                  const owner = users.find((u) => u.id === bet.userId);
+                  const first = bet.selections[0];
+                  const summary = first
+                    ? first.kind === 'election'
+                      ? first.matchTitle
+                      : `${first.homeTeam} x ${first.awayTeam}`
+                    : '—';
+                  const confirmKey =
+                    settleConfirm?.split('|')[0] === bet.id ? settleConfirm : null;
+
+                  return (
+                    <div
+                      key={bet.id}
+                      className={`p-3.5 rounded-xl border transition-all ${
+                        isOpen
+                          ? 'bg-[#161b22] border-[#00e701]/40 ring-1 ring-[#00e701]/10'
+                          : 'bg-[#131720] border-[#252d3d] opacity-90'
+                      }`}
+                    >
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                        <div className="flex items-start gap-3 min-w-0">
+                          <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                            isOpen ? 'bg-[#00e701]/15 text-[#00e701]' :
+                            bet.status === 'WON' ? 'bg-emerald-500/20 text-emerald-400' :
+                            bet.status === 'LOST' ? 'bg-rose-500/20 text-rose-400' :
+                            'bg-slate-500/20 text-slate-400'
+                          }`}>
+                            <CheckCircle2 className="w-5 h-5 font-bold" />
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-white text-sm">
+                                {owner?.name ?? 'Usuario'}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                isOpen ? 'bg-amber-500/20 text-amber-300' :
+                                bet.status === 'WON' ? 'bg-emerald-500/20 text-emerald-400' :
+                                bet.status === 'VOID' ? 'bg-slate-500/20 text-slate-300' :
+                                bet.status === 'CASHED_OUT' ? 'bg-sky-500/20 text-sky-300' :
+                                'bg-rose-500/20 text-rose-400'
+                              }`}>
+                                {bet.status === 'OPEN' ? 'Em aberto' :
+                                 bet.status === 'WON' ? 'Ganha' :
+                                 bet.status === 'VOID' ? 'Anulada' :
+                                 bet.status === 'CASHED_OUT' ? 'Cash Out' : 'Perdida'}
+                              </span>
+                              <span className="text-[11px] text-slate-400 font-mono">
+                                {bet.date}
+                              </span>
+                            </div>
+
+                            <div className="text-slate-400 text-[11px] mt-1">
+                              {bet.selections.length}× {summary}
+                              {bet.selections.length > 1 && (
+                                <span className="font-mono"> · Odd {bet.totalOdd.toFixed(2)}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-0 border-[#21262d]">
+                          <div className="text-left sm:text-right">
+                            <span className="text-[10px] text-slate-400 block uppercase">
+                              {isOpen ? 'Pagar se ganhar' : 'Retorno'}
+                            </span>
+                            <span className="font-mono text-base font-extrabold text-[#00e701]">
+                              R$ {bet.potentialReturn.toFixed(2)}
+                            </span>
+                            <span className="text-[10px] text-slate-400 block font-mono">
+                              Apostado R$ {bet.stake.toFixed(2)}
+                            </span>
+                          </div>
+
+                          {isOpen && (
+                            <div className="flex items-center gap-1.5">
+                              {confirmKey ? (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      const result = confirmKey.split('|')[1] as
+                                        | 'WON'
+                                        | 'LOST'
+                                        | 'VOID';
+                                      setSettleConfirm(null);
+                                      onSettleBet(bet.id, result);
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg bg-[#00e701] hover:bg-[#00c901] text-black font-extrabold text-xs uppercase flex items-center gap-1 transition-all shadow-md shadow-[#00e701]/20 cursor-pointer"
+                                  >
+                                    <Check className="w-4 h-4 stroke-[3]" />
+                                    <span>Confirmar</span>
+                                  </button>
+                                  <button
+                                    onClick={() => setSettleConfirm(null)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:text-white text-slate-400 font-bold text-xs uppercase transition-colors cursor-pointer"
+                                  >
+                                    <span>Cancelar</span>
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => setSettleConfirm(`${bet.id}|WON`)}
+                                    className="px-3 py-1.5 rounded-lg bg-[#00e701] hover:bg-[#00c901] text-black font-extrabold text-xs uppercase flex items-center gap-1 transition-all shadow-md shadow-[#00e701]/20 cursor-pointer"
+                                  >
+                                    <Check className="w-4 h-4 stroke-[3]" />
+                                    <span>Ganhou</span>
+                                  </button>
+                                  <button
+                                    onClick={() => setSettleConfirm(`${bet.id}|LOST`)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-rose-950/60 border border-rose-600/40 hover:bg-rose-900/60 text-rose-300 font-bold text-xs uppercase flex items-center gap-1 transition-colors cursor-pointer"
+                                  >
+                                    <X className="w-4 h-4" />
+                                    <span>Perdeu</span>
+                                  </button>
+                                  <button
+                                    onClick={() => setSettleConfirm(`${bet.id}|VOID`)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:text-white text-slate-400 font-bold text-xs uppercase transition-colors cursor-pointer"
+                                  >
+                                    <span>Anular</span>
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 4: USERS MANAGEMENT */}
         {activeTab === 'users' && (
           <div className="flex flex-col gap-3 text-xs">
             <div className="flex items-center justify-between gap-3">
@@ -870,7 +1057,7 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
           </div>
         )}
 
-        {/* Tab 4: HOUSE SETTINGS */}
+        {/* Tab 5: HOUSE SETTINGS */}
         {activeTab === 'settings' && (
           <div className="max-w-3xl flex flex-col gap-4 text-xs">
             <div className="flex items-center justify-between border-b border-[#21262d] pb-2">
@@ -1103,7 +1290,7 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
           </div>
         )}
 
-        {/* Tab 5: MERCADOS ELEITORAIS */}
+        {/* Tab 6: MERCADOS ELEITORAIS */}
         {activeTab === 'elections' && (
           <div className="max-w-4xl flex flex-col gap-4 text-xs">
             <div className="flex items-center justify-between border-b border-[#21262d] pb-2">

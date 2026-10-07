@@ -832,6 +832,7 @@ export async function placeElectionBet(input: {
 
 interface RowBet {
   id: string;
+  user_id?: string;
   type: string;
   status: string;
   selections: unknown;
@@ -921,6 +922,7 @@ function rowToTicket(row: RowBet, contests: ElectionRef[]): BetTicket {
 
   return {
     id: row.id,
+    userId: row.user_id,
     date: formatBetDate(row.placed_at),
     type: row.type === 'multiple' ? 'multiple' : 'single',
     selections,
@@ -950,6 +952,28 @@ export async function fetchBets(
     .eq('user_id', userId)
     .order('placed_at', { ascending: false })
     .limit(100);
+
+  if (error) throw new Error(describeSupabaseError(error));
+
+  return ((data ?? []) as unknown as RowBet[]).map((row) => rowToTicket(row, contests));
+}
+
+/**
+ * Fila de liquidacao do painel admin: TODAS as apostas, com o dono.
+ *
+ * Sem `.eq('user_id')` de proposito: a policy "admin le todas as apostas" e
+ * quem autoriza. Role=user passa pela mesma consulta e so enxerga as proprias
+ * (RLS aplica o filtro), mas o painel nem tenta — a lista so e pedida em sessao
+ * de admin.
+ */
+export async function fetchAllBets(contests: ElectionRef[] = []): Promise<BetTicket[]> {
+  const { data, error } = await supabase
+    .from('bets')
+    .select(
+      'id, user_id, type, status, selections, total_odds, stake, potential_return, placed_at, election_contest_id'
+    )
+    .order('placed_at', { ascending: false })
+    .limit(200);
 
   if (error) throw new Error(describeSupabaseError(error));
 
