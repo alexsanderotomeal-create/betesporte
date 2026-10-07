@@ -43,6 +43,8 @@ interface HeaderProps {
   onToggleAutoAcceptOdds: () => void;
   isSyncing?: boolean;
   onOpenElectionOfficial?: () => void;
+  /** Se o bônus de boas-vindas está ativo; esconde o selo de bônus quando não. */
+  welcomeBonusEnabled?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -66,6 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleAutoAcceptOdds,
   isSyncing = false,
   onOpenElectionOfficial,
+  welcomeBonusEnabled = true,
 }) => {
   const [showBalance, setShowBalance] = useState(true);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
@@ -298,9 +301,11 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Cadastre-se</span>
-                <span className="hidden sm:inline bg-black/20 text-black px-1.5 py-0.5 rounded text-[9px] font-black">
-                  +R$ 150 BÔNUS
-                </span>
+                {welcomeBonusEnabled && (
+                  <span className="hidden sm:inline bg-black/20 text-black px-1.5 py-0.5 rounded text-[9px] font-black">
+                    +R$ 150 BÔNUS
+                  </span>
+                )}
               </button>
             </div>
           )}

@@ -28,6 +28,12 @@ interface DepositModalProps {
    * responder. O saldo NAO e creditado aqui: creditado na aprovacao do admin.
    */
   onRequestDepositApproval?: (req: DepositRequest) => void | Promise<void>;
+  /** Mínimo aceito para depósito; vem das configurações da casa. */
+  minDeposit?: number;
+  /** Se o bônus de boas-vindas está ativo nas configurações da casa. */
+  welcomeBonusEnabled?: boolean;
+  /** Percentual do bônus de boas-vindas (ex.: 100 = +100% no primeiro depósito). */
+  welcomeBonusPercent?: number;
 }
 
 export const DepositModal: React.FC<DepositModalProps> = ({
@@ -37,10 +43,13 @@ export const DepositModal: React.FC<DepositModalProps> = ({
   pixConfig,
   onDepositSuccess,
   onRequestDepositApproval,
+  minDeposit = 10,
+  welcomeBonusEnabled = true,
+  welcomeBonusPercent = 100,
 }) => {
   const [amount, setAmount] = useState<number>(50);
   const [customAmount, setCustomAmount] = useState<string>('50');
-  const [includeBonus, setIncludeBonus] = useState<boolean>(true);
+  const [includeBonus, setIncludeBonus] = useState<boolean>(welcomeBonusEnabled);
   const [step, setStep] = useState<'amount' | 'pix_code' | 'success'>('amount');
   
   const [pixPayload, setPixPayload] = useState<string>('');
@@ -56,8 +65,9 @@ export const DepositModal: React.FC<DepositModalProps> = ({
       setStep('amount');
       setCopied(false);
       setTimeLeft(900);
+      setIncludeBonus(welcomeBonusEnabled);
     }
-  }, [isOpen]);
+  }, [isOpen, welcomeBonusEnabled]);
 
   // Countdown timer when on pix_code step
   useEffect(() => {
@@ -69,6 +79,11 @@ export const DepositModal: React.FC<DepositModalProps> = ({
   }, [step]);
 
   if (!isOpen) return null;
+
+  const bonusPct = welcomeBonusPercent ?? 100;
+  const bonusAllowed = welcomeBonusEnabled !== false;
+  const bonusAmount = (amount * bonusPct) / 100;
+  const effectiveIncludeBonus = bonusAllowed && includeBonus;
 
   const handleSelectAmount = (val: number) => {
     setAmount(val);
@@ -85,7 +100,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
   };
 
   const handleGeneratePix = async () => {
-    if (amount < 10) return;
+    if (amount < minDeposit) return;
     const generatedTxid = `PIX-${Date.now().toString().slice(-8)}`;
     const code = generatePixCode(amount, generatedTxid, pixConfig);
     const qrData = await generatePixQrCodeDataUrl(code);
@@ -150,7 +165,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
       return;
     }
 
-    const bonusToAdd = includeBonus ? amount : 0;
+    const bonusToAdd = effectiveIncludeBonus ? bonusAmount : 0;
     const tx: Transaction = {
       id: `tx-dep-${Date.now()}`,
       type: 'DEPOSIT_PIX',
@@ -208,7 +223,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
           <div className="p-4 sm:p-6 flex flex-col gap-4">
             <div>
               <label className="text-xs font-semibold text-slate-300 block mb-2">
-                Escolha um valor de depósito (Mínimo R$ 10,00)
+                Escolha um valor de depósito (Mínimo R$ {minDeposit.toFixed(2)})
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {[20, 50, 100, 250, 500, 1000].map((val) => (
@@ -246,42 +261,44 @@ export const DepositModal: React.FC<DepositModalProps> = ({
                   placeholder="0,00"
                 />
               </div>
-              {amount < 10 && (
+              {amount < minDeposit && (
                 <span className="text-[11px] text-rose-400 mt-1 block">
-                  O valor mínimo de depósito é R$ 10,00.
+                  O valor mínimo de depósito é R$ {minDeposit.toFixed(2)}.
                 </span>
               )}
             </div>
 
             {/* First Deposit Bonus Checkbox */}
-            <div 
-              onClick={() => setIncludeBonus(!includeBonus)}
-              className="bg-gradient-to-r from-amber-950/40 via-amber-900/20 to-transparent border border-amber-500/40 rounded-xl p-3 flex items-start gap-2.5 cursor-pointer hover:border-amber-400 transition-colors"
-            >
-              <input
-                type="checkbox"
-                checked={includeBonus}
-                onChange={() => {}}
-                className="mt-0.5 rounded text-[#00e701] focus:ring-0"
-              />
-              <div className="flex-1">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Ativar Bônus de 100% no Primeiro Depósito
-                </div>
-                <div className="text-[11px] text-slate-400 mt-0.5">
-                  Deposite R$ {amount.toFixed(2)} e jogue com{' '}
-                  <strong className="text-amber-200">R$ {(amount * 2).toFixed(2)}</strong>!
+            {bonusAllowed && (
+              <div 
+                onClick={() => setIncludeBonus(!effectiveIncludeBonus)}
+                className="bg-gradient-to-r from-amber-950/40 via-amber-900/20 to-transparent border border-amber-500/40 rounded-xl p-3 flex items-start gap-2.5 cursor-pointer hover:border-amber-400 transition-colors"
+              >
+                <input
+                  type="checkbox"
+                  checked={effectiveIncludeBonus}
+                  onChange={() => {}}
+                  className="mt-0.5 rounded text-[#00e701] focus:ring-0"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Ativar Bônus de {bonusPct}% no Primeiro Depósito
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    Deposite R$ {amount.toFixed(2)} e jogue com{' '}
+                    <strong className="text-amber-200">R$ {(amount + bonusAmount).toFixed(2)}</strong>!
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Submit Button */}
             <button
-              disabled={amount < 10}
+              disabled={amount < minDeposit}
               onClick={handleGeneratePix}
               className={`w-full py-3 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                amount >= 10
+                amount >= minDeposit
                   ? 'bg-[#00e701] hover:bg-[#00c901] active:scale-[0.99] text-black shadow-lg shadow-[#00e701]/25'
                   : 'bg-[#21262d] text-slate-500 cursor-not-allowed'
               }`}
@@ -323,9 +340,9 @@ export const DepositModal: React.FC<DepositModalProps> = ({
               <span className="font-mono text-2xl font-extrabold text-[#00e701]">
                 R$ {amount.toFixed(2)}
               </span>
-              {includeBonus && (
+              {effectiveIncludeBonus && (
                 <span className="text-[11px] text-amber-400 block font-medium">
-                  (+ R$ {amount.toFixed(2)} Bônus Ativo)
+                  (+ R$ {bonusAmount.toFixed(2)} Bônus Ativo)
                 </span>
               )}
             </div>
@@ -409,10 +426,10 @@ export const DepositModal: React.FC<DepositModalProps> = ({
                 </span>
               </div>
 
-              {includeBonus && (
+              {effectiveIncludeBonus && (
                 <div className="flex items-center justify-between border-b border-[#21262d] pb-2 text-amber-400">
                   <span>Bônus previsto</span>
-                  <span className="font-mono font-bold">+ R$ {amount.toFixed(2)}</span>
+                  <span className="font-mono font-bold">+ R$ {bonusAmount.toFixed(2)}</span>
                 </div>
               )}
 

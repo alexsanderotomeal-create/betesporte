@@ -26,6 +26,8 @@ interface AuthModalProps {
   onClose: () => void;
   onLogin: (user: UserAccount) => void;
   initialMode?: 'login' | 'register' | 'forgot' | 'new-password';
+  /** Se o bônus de boas-vindas está ativo nas configurações da casa. */
+  welcomeBonusEnabled?: boolean;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -33,6 +35,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   onLogin,
   initialMode = 'login',
+  welcomeBonusEnabled = true,
 }) => {
   const [mode, setMode] = useState<'login' | 'register' | 'forgot' | 'new-password'>(initialMode);
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -391,10 +394,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               </div>
 
-              <div className="bg-gradient-to-r from-amber-950/40 to-transparent border border-amber-500/40 rounded-xl p-2.5 flex items-center gap-2 text-amber-300 text-xs">
-                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Bonus de boas-vindas liberado para o primeiro deposito.</span>
-              </div>
+              {welcomeBonusEnabled && (
+                <div className="bg-gradient-to-r from-amber-950/40 to-transparent border border-amber-500/40 rounded-xl p-2.5 flex items-center gap-2 text-amber-300 text-xs">
+                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Bonus de boas-vindas liberado para o primeiro deposito.</span>
+                </div>
+              )}
 
               <label className="flex items-start gap-2 cursor-pointer pt-1">
                 <input

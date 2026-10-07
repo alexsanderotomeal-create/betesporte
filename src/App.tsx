@@ -1047,6 +1047,7 @@ export default function App() {
         onToggleAutoAcceptOdds={() => setAutoAcceptOdds(!autoAcceptOdds)}
         isSyncing={isSyncing}
         onOpenElectionOfficial={() => setIsElectionModalOpen(true)}
+        welcomeBonusEnabled={houseSettings.welcomeBonusEnabled}
       />
 
       {/* Main Layout Container */}
@@ -1185,6 +1186,9 @@ export default function App() {
           merchantName: houseSettings.pixMerchantName,
           merchantCity: houseSettings.pixMerchantCity,
         }}
+        minDeposit={houseSettings.minDeposit}
+        welcomeBonusEnabled={houseSettings.welcomeBonusEnabled}
+        welcomeBonusPercent={houseSettings.welcomeBonusPercent}
         onDepositSuccess={handleDepositSuccess}
         onRequestDepositApproval={handleQueueDepositRequest}
       />
@@ -1228,6 +1232,7 @@ export default function App() {
         onClose={() => setIsAuthOpen(false)}
         onLogin={handleLogin}
         initialMode={authInitialMode}
+        welcomeBonusEnabled={houseSettings.welcomeBonusEnabled}
       />
 
       <UserDashboardModal
