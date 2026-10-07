@@ -145,6 +145,7 @@ async function runSyncPass(admin: ReturnType<typeof createClient>) {
   }
 
   const margin = await loadHouseMargin(admin);
+  const catalog = await loadCatalog(admin);
   const results: { leagues: number; synced: number; errors: number; skipped: number; lastError?: string } = {
     leagues: leagues.length,
     synced: 0,
@@ -155,8 +156,12 @@ async function runSyncPass(admin: ReturnType<typeof createClient>) {
   for (const league of leagues) {
     try {
       const events = await fetchScoreboard(league.sport, league.slug);
+      const existingMatches = await loadExistingMatches(
+        admin,
+        events.map((e) => e.id)
+      );
       for (const event of events) {
-        const written = await persistEvent(admin, league, event, margin);
+        const written = await persistEvent(admin, league, event, margin, catalog, existingMatches);
         if (written === 'synced') results.synced++;
         else if (written === 'skipped') results.skipped++;
       }
@@ -299,28 +304,112 @@ async function fetchScoreboard(sport: string, slug: string): Promise<EspnEvent[]
 }
 
 // ---------------------------------------------------------------------------
-// Persistencia
+// Persistencia (diff: so grava o que mudou)
 // ---------------------------------------------------------------------------
 
-async function persistEvent(
+interface TeamRef {
+  id: string;
+}
+
+type Catalog = {
+  leagues: Map<string, Record<string, unknown>>;
+  teams: Map<string, Record<string, unknown>>;
+};
+
+/** Pre-carrega ligas/times do banco uma vez por passada (cache em memoria). */
+async function loadCatalog(admin: ReturnType<typeof createClient>): Promise<Catalog> {
+  const [leaguesRes, teamsRes] = await Promise.all([
+    admin.from('leagues').select('id, external_key, name, country, sport'),
+    admin.from('teams').select('id, external_key, name, short_name, logo_url'),
+  ]);
+  if (leaguesRes.error) throw leaguesRes.error;
+  if (teamsRes.error) throw teamsRes.error;
+
+  const leagues = new Map<string, Record<string, unknown>>();
+  for (const r of leaguesRes.data ?? []) {
+    if (r.external_key) leagues.set(r.external_key, r);
+  }
+  const teams = new Map<string, Record<string, unknown>>();
+  for (const r of teamsRes.data ?? []) {
+    if (r.external_key) teams.set(r.external_key, r);
+  }
+  return { leagues, teams };
+}
+
+/** Liga, partidas (com mercados/labels ja resolvidos) das event ids desta passada. */
+async function loadExistingMatches(
+  admin: ReturnType<typeof createClient>,
+  externalIds: string[]
+): Promise<Map<string, Record<string, unknown>>> {
+  const map = new Map<string, Record<string, unknown>>();
+  if (externalIds.length === 0) return map;
+
+  const { data: matches, error } = await admin
+    .from('matches')
+    .select('id, external_id, league_id, home_team_id, away_team_id, status, kickoff_at, minute, home_score, away_score, margin')
+    .in('external_id', externalIds);
+  if (error) throw error;
+
+  for (const m of matches ?? []) {
+    if (m.external_id) map.set(m.external_id, { ...m, markets: [] });
+  }
+
+  const matchRows = matches ?? [];
+  if (matchRows.length === 0) return map;
+  const matchIds = matchRows.map((m: { id: string }) => m.id);
+
+  const { data: markets, error: mErr } = await admin
+    .from('match_markets')
+    .select('id, match_id, name, category')
+    .in('match_id', matchIds);
+  if (mErr) throw mErr;
+
+  const marketRows = markets ?? [];
+  const marketIds = marketRows.map((m: { id: string }) => m.id);
+  const choicesByMarket = new Map<string, Array<Record<string, unknown>>>();
+  if (marketIds.length > 0) {
+    const { data: choices, error: cErr } = await admin
+      .from('market_choices')
+      .select('id, market_id, label, odds, previous_odds, trend, is_suspended, sort_order')
+      .in('market_id', marketIds);
+    if (cErr) throw cErr;
+    for (const c of choices ?? []) {
+      const arr = choicesByMarket.get(c.market_id) ?? [];
+      arr.push(c);
+      choicesByMarket.set(c.market_id, arr);
+    }
+  }
+
+  const marketsByMatch = new Map<string, Array<Record<string, unknown>>>();
+  for (const m of marketRows) {
+    const arr = marketsByMatch.get(m.match_id) ?? [];
+    arr.push({ ...m, market_choices: choicesByMarket.get(m.id) ?? [] });
+    marketsByMatch.set(m.match_id, arr);
+  }
+  for (const m of matchRows) {
+    const key = m.external_id;
+    if (!key) continue;
+    map.set(key, { ...map.get(key), markets: marketsByMatch.get(m.id) ?? [] });
+  }
+  return map;
+}
+
+async function syncLeague(
   admin: ReturnType<typeof createClient>,
   league: FeedLeague,
-  event: EspnEvent,
-  margin: number
-): Promise<'synced' | 'skipped'> {
-  const competition = event.competitions?.[0];
-  if (!competition) return 'skipped';
+  leagueMap: Map<string, Record<string, unknown>>
+): Promise<string> {
+  const existing = leagueMap.get(league.slug);
+  if (
+    existing &&
+    existing.name === league.name &&
+    existing.country === league.country &&
+    existing.sport === league.sport
+  ) {
+    return existing.id as string;
+  }
 
-  const home = competition.competitors.find((c) => c.homeAway === 'home');
-  const away = competition.competitors.find((c) => c.homeAway === 'away');
-  if (!home || !away) return 'skipped';
-
-  const state = competition.status?.type?.state ?? 'pre'; // pre | in | post
-  if (!['pre', 'in', 'post'].includes(state)) return 'skipped';
-
-  const status = state === 'in' ? 'LIVE' : state === 'post' ? 'FINISHED' : 'OPEN';
-
-  const leagueUpsert = await admin
+  const upsert = await admin
     .from('leagues')
     .upsert(
       {
@@ -331,31 +420,100 @@ async function persistEvent(
       },
       { onConflict: 'external_key', ignoreDuplicates: false }
     )
-    .select('id')
+    .select('id, external_key, name, country, sport')
     .maybeSingle();
+  if (upsert.error) throw upsert.error;
+  leagueMap.set(league.slug, upsert.data as Record<string, unknown>);
+  return upsert.data?.id as string;
+}
 
-  if (leagueUpsert.error) throw leagueUpsert.error;
-  const leagueId = leagueUpsert.data?.id as string;
+async function syncTeam(
+  admin: ReturnType<typeof createClient>,
+  team: EspnEvent['competitions'][number]['competitors'][number]['team'],
+  teamMap: Map<string, Record<string, unknown>>
+): Promise<TeamRef> {
+  const externalKey = String(team.id);
+  const logo =
+    team.logos?.[0]?.href ??
+    team.logo ??
+    null;
+  const name = team.displayName;
+  const short = team.shortDisplayName ?? team.displayName;
 
-  const homeTeam = await upsertTeam(admin, home.team);
-  const awayTeam = await upsertTeam(admin, away.team);
+  const existing = teamMap.get(externalKey);
+  if (
+    existing &&
+    existing.name === name &&
+    (existing.short_name ?? existing.name) === short &&
+    (existing.logo_url ?? null) === (logo ?? null)
+  ) {
+    return { id: existing.id as string };
+  }
 
-  const kickoffAt = new Date(event.date).toISOString();
-  const minute = computeMinute(league.sport, competition);
-  const homeScore = Number(home.score) || 0;
-  const awayScore = Number(away.score) || 0;
+  const upsert = await admin
+    .from('teams')
+    .upsert(
+      {
+        external_key: externalKey,
+        name,
+        short_name: short,
+        logo_url: logo,
+      },
+      { onConflict: 'external_key', ignoreDuplicates: false }
+    )
+    .select('id, external_key, name, short_name, logo_url')
+    .maybeSingle();
+  if (upsert.error) throw upsert.error;
+  teamMap.set(externalKey, upsert.data as Record<string, unknown>);
+  return { id: upsert.data?.id as string };
+}
 
-  const matchUpsert = await admin
+async function syncMatch(
+  admin: ReturnType<typeof createClient>,
+  sport: string,
+  leagueId: string,
+  homeTeamId: string,
+  awayTeamId: string,
+  event: EspnEvent,
+  margin: number,
+  existingMatches: Map<string, Record<string, unknown>>
+): Promise<string> {
+  const competition = event.competitions?.[0];
+  const state = competition?.status?.type?.state ?? 'pre';
+  const status = state === 'in' ? 'LIVE' : state === 'post' ? 'FINISHED' : 'OPEN';
+  const minute = state === 'pre' ? 0 : computeMinute(sport, competition!);
+  const homeScore = Number(competition?.competitors.find((c) => c.homeAway === 'home')?.score) || 0;
+  const awayScore = Number(competition?.competitors.find((c) => c.homeAway === 'away')?.score) || 0;
+  const kickoffMs = Date.parse(event.date);
+  const kickoffAt = new Date(kickoffMs).toISOString();
+
+  const existing = existingMatches.get(event.id);
+  if (
+    existing &&
+    existing.league_id === leagueId &&
+    existing.home_team_id === homeTeamId &&
+    existing.away_team_id === awayTeamId &&
+    existing.status === status &&
+    Math.abs(Date.parse(existing.kickoff_at as string) - kickoffMs) < 60_000 &&
+    Number(existing.minute ?? 0) === minute &&
+    Number(existing.home_score ?? 0) === homeScore &&
+    Number(existing.away_score ?? 0) === awayScore &&
+    Number(existing.margin ?? 0) === margin
+  ) {
+    return existing.id as string;
+  }
+
+  const upsert = await admin
     .from('matches')
     .upsert(
       {
         external_id: event.id,
         league_id: leagueId,
-        home_team_id: homeTeam.id,
-        away_team_id: awayTeam.id,
+        home_team_id: homeTeamId,
+        away_team_id: awayTeamId,
         status,
         kickoff_at: kickoffAt,
-        minute: state === 'pre' ? 0 : minute,
+        minute,
         home_score: homeScore,
         away_score: awayScore,
         margin,
@@ -363,51 +521,66 @@ async function persistEvent(
       },
       { onConflict: 'external_id', ignoreDuplicates: false }
     )
-    .select('id')
+    .select('id, external_id, league_id, home_team_id, away_team_id, status, kickoff_at, minute, home_score, away_score, margin')
     .maybeSingle();
+  if (upsert.error) throw upsert.error;
 
-  if (matchUpsert.error) throw matchUpsert.error;
-  const matchId = matchUpsert.data?.id as string;
+  const next = {
+    ...(upsert.data as Record<string, unknown>),
+    markets: (existing as Record<string, unknown> | undefined)?.markets ?? [],
+  };
+  existingMatches.set(event.id, next);
+  return upsert.data?.id as string;
+}
 
-  // Mercados recriados a cada sync: placar/relogio reais, preco da casa.
-  await replaceMarkets(admin, matchId, league.sport, margin, {
-    homeName: home.team.shortDisplayName || home.team.displayName,
-    awayName: away.team.shortDisplayName || away.team.displayName,
-    odds: computeOdds(league.sport, state, minute, homeScore, awayScore),
-  });
+async function persistEvent(
+  admin: ReturnType<typeof createClient>,
+  league: FeedLeague,
+  event: EspnEvent,
+  margin: number,
+  catalog: Catalog,
+  existingMatches: Map<string, Record<string, unknown>>
+): Promise<'synced' | 'skipped'> {
+  const competition = event.competitions?.[0];
+  if (!competition) return 'skipped';
+
+  const home = competition.competitors.find((c) => c.homeAway === 'home');
+  const away = competition.competitors.find((c) => c.homeAway === 'away');
+  if (!home || !away) return 'skipped';
+
+  const state = competition.status?.type?.state ?? 'pre';
+  if (!['pre', 'in', 'post'].includes(state)) return 'skipped';
+
+  const leagueId = await syncLeague(admin, league, catalog.leagues);
+  const homeTeam = await syncTeam(admin, home.team, catalog.teams);
+  const awayTeam = await syncTeam(admin, away.team, catalog.teams);
+
+  const matchId = await syncMatch(
+    admin,
+    league.sport,
+    leagueId,
+    homeTeam.id,
+    awayTeam.id,
+    event,
+    margin,
+    existingMatches
+  );
+
+  // Mercados atualizados por diff: so grava quando a odd/label mudou.
+  await syncMarkets(
+    admin,
+    matchId,
+    league.sport,
+    margin,
+    {
+      homeName: home.team.shortDisplayName || home.team.displayName,
+      awayName: away.team.shortDisplayName || away.team.displayName,
+      odds: computeOdds(league.sport, state, computeMinute(league.sport, competition), Number(home.score) || 0, Number(away.score) || 0),
+    },
+    existingMatches.get(event.id)
+  );
 
   return 'synced';
-}
-
-interface TeamRef {
-  id: string;
-}
-
-async function upsertTeam(
-  admin: ReturnType<typeof createClient>,
-  team: EspnEvent['competitions'][number]['competitors'][number]['team']
-): Promise<TeamRef> {
-  const logo =
-    team.logos?.[0]?.href ??
-    team.logo ??
-    null;
-
-  const upsert = await admin
-    .from('teams')
-    .upsert(
-      {
-        external_key: team.id,
-        name: team.displayName,
-        short_name: team.shortDisplayName ?? team.displayName,
-        logo_url: logo,
-      },
-      { onConflict: 'external_key', ignoreDuplicates: false }
-    )
-    .select('id')
-    .maybeSingle();
-
-  if (upsert.error) throw upsert.error;
-  return { id: upsert.data?.id as string };
 }
 
 // ---------------------------------------------------------------------------
@@ -479,92 +652,177 @@ interface MarketOdds {
   odds: Probs;
 }
 
-async function replaceMarkets(
+interface DesiredChoice {
+  label: string;
+  odds: number;
+  sort_order: number;
+}
+
+interface DesiredMarket {
+  name: string;
+  category: string;
+  choices: DesiredChoice[];
+}
+
+function buildMarkets(
+  sport: string,
+  margin: number,
+  market: MarketOdds
+): DesiredMarket[] {
+  const { odds } = market;
+  const m = margin;
+  const withSort = (arr: Array<[string, number]>): DesiredChoice[] =>
+    arr.map(([label, odd], i) => ({ label, odds: odd, sort_order: i }));
+
+  if (sport === 'basketball') {
+    return [
+      {
+        name: 'Vencedor do Jogo (Inc. Prorrogacao)',
+        category: 'main',
+        choices: withSort([
+          [market.homeName, fairToOdd(odds.home, m)],
+          [market.awayName, fairToOdd(odds.away, m)],
+        ]),
+      },
+      {
+        name: `Total de Pontos (Mais/Menos ${odds.line.toFixed(0)})`,
+        category: 'goals',
+        choices: withSort([
+          [`Mais de ${odds.line.toFixed(0)}`, fairToOdd(odds.over, m)],
+          [`Menos de ${odds.line.toFixed(0)}`, fairToOdd(1 - odds.over, m)],
+        ]),
+      },
+    ];
+  }
+
+  return [
+    {
+      name: 'Resultado Final (1X2)',
+      category: 'main',
+      choices: withSort([
+        [market.homeName, fairToOdd(odds.home, m)],
+        ['Empate', fairToOdd(odds.draw ?? 0.25, m)],
+        [market.awayName, fairToOdd(odds.away, m)],
+      ]),
+    },
+    {
+      name: 'Dupla Chance',
+      category: 'main',
+      choices: withSort([
+        [`${market.homeName} ou Empate`, fairToOdd((odds.home ?? 0) + (odds.draw ?? 0), m)],
+        [`${market.homeName} ou ${market.awayName}`, fairToOdd((odds.home ?? 0) + (odds.away ?? 0), m)],
+        [`Empate ou ${market.awayName}`, fairToOdd((odds.draw ?? 0) + (odds.away ?? 0), m)],
+      ]),
+    },
+    {
+      name: 'Total de Gols (Mais/Menos 2.5)',
+      category: 'goals',
+      choices: withSort([
+        ['Mais de 2.5 Gols', fairToOdd(odds.over, m)],
+        ['Menos de 2.5 Gols', fairToOdd(1 - odds.over, m)],
+      ]),
+    },
+  ];
+}
+
+/**
+ * Atualiza mercados por diff: so grava quando existiu mudanca real (mercado novo,
+ * category alterada, choice novo, label removido ou odd alterada). Nao recria as
+ * linhas a cada sync — preserva previous_odds/trend e elimina a amplificacao de
+ * escrita (antes eram ~300 inserts/deletes por passada para ~20 linhas vivas).
+ */
+async function syncMarkets(
   admin: ReturnType<typeof createClient>,
   matchId: string,
   sport: string,
   margin: number,
-  market: MarketOdds
+  market: MarketOdds,
+  existingMatchRow: Record<string, unknown> | undefined
 ): Promise<void> {
-  const { error: clearError } = await admin
-    .from('match_markets')
-    .delete()
-    .eq('match_id', matchId);
-  if (clearError) throw clearError;
+  const desired = buildMarkets(sport, margin, market);
+  const existingRows = (Array.isArray(existingMatchRow?.markets)
+    ? existingMatchRow.markets
+    : []) as Array<Record<string, unknown> & { market_choices?: Array<Record<string, unknown>> }>;
+  const existingByName = new Map(existingRows.map((em) => [em.name, em]));
+  const desiredByName = new Map(desired.map((dm) => [dm.name, dm]));
 
-  const { odds } = market;
-  const m = margin;
+  for (const dm of desired) {
+    const em = existingByName.get(dm.name);
+    if (!em) {
+      const inserted = await admin
+        .from('match_markets')
+        .insert({ match_id: matchId, name: dm.name, category: dm.category })
+        .select('id')
+        .single();
+      if (inserted.error) throw inserted.error;
+      await syncChoices(admin, inserted.data?.id as string, [], dm.choices);
+      continue;
+    }
 
-  const rows: Array<{ name: string; category: string; choices: Array<[string, number]> }> =
-    sport === 'basketball'
-      ? [
-          {
-            name: 'Vencedor do Jogo (Inc. Prorrogacao)',
-            category: 'main',
-            choices: [
-              [market.homeName, fairToOdd(odds.home, m)],
-              [market.awayName, fairToOdd(odds.away, m)],
-            ],
-          },
-          {
-            name: `Total de Pontos (Mais/Menos ${odds.line.toFixed(0)})`,
-            category: 'goals',
-            choices: [
-              [`Mais de ${odds.line.toFixed(0)}`, fairToOdd(odds.over, m)],
-              [`Menos de ${odds.line.toFixed(0)}`, fairToOdd(1 - odds.over, m)],
-            ],
-          },
-        ]
-      : [
-          {
-            name: 'Resultado Final (1X2)',
-            category: 'main',
-            choices: [
-              [market.homeName, fairToOdd(odds.home, m)],
-              ['Empate', fairToOdd(odds.draw ?? 0.25, m)],
-              [market.awayName, fairToOdd(odds.away, m)],
-            ],
-          },
-          {
-            name: 'Dupla Chance',
-            category: 'main',
-            choices: [
-              [`${market.homeName} ou Empate`, fairToOdd((odds.home ?? 0) + (odds.draw ?? 0), m)],
-              [`${market.homeName} ou ${market.awayName}`, fairToOdd((odds.home ?? 0) + (odds.away ?? 0), m)],
-              [`Empate ou ${market.awayName}`, fairToOdd((odds.draw ?? 0) + (odds.away ?? 0), m)],
-            ],
-          },
-          {
-            name: 'Total de Gols (Mais/Menos 2.5)',
-            category: 'goals',
-            choices: [
-              ['Mais de 2.5 Gols', fairToOdd(odds.over, m)],
-              ['Menos de 2.5 Gols', fairToOdd(1 - odds.over, m)],
-            ],
-          },
-        ];
+    if (em.category !== dm.category) {
+      const upd = await admin
+        .from('match_markets')
+        .update({ category: dm.category })
+        .eq('id', em.id as string)
+        .select('id')
+        .single();
+      if (upd.error) throw upd.error;
+    }
+    await syncChoices(admin, em.id as string, em.market_choices ?? [], dm.choices);
+  }
 
-  for (const marketRow of rows) {
-    const inserted = await admin
-      .from('match_markets')
-      .insert({ match_id: matchId, name: marketRow.name, category: marketRow.category })
-      .select('id')
-      .single();
+  // Mercados que nao existem mais (raros): apaga (choices caem em cascata).
+  for (const em of existingRows) {
+    if (!desiredByName.has(em.name as string)) {
+      const del = await admin.from('match_markets').delete().eq('id', em.id as string);
+      if (del.error) throw del.error;
+    }
+  }
+}
 
-    if (inserted.error) throw inserted.error;
+async function syncChoices(
+  admin: ReturnType<typeof createClient>,
+  marketId: string,
+  existingChoices: Array<Record<string, unknown>>,
+  desiredChoices: DesiredChoice[]
+): Promise<void> {
+  const desiredMap = new Map(desiredChoices.map((dc) => [dc.label, dc]));
 
-    const choices = marketRow.choices.map(([label, odd], i) => ({
-      market_id: inserted.data?.id as string,
-      label,
-      odds: odd,
-      previous_odds: null,
-      trend: 'stable' as const,
-      is_suspended: false,
-      sort_order: i,
-    }));
+  for (const ec of existingChoices) {
+    if (!desiredMap.has(ec.label as string)) {
+      const del = await admin.from('market_choices').delete().eq('id', ec.id as string);
+      if (del.error) throw del.error;
+    }
+  }
 
-    const { error: choiceError } = await admin.from('market_choices').insert(choices);
-    if (choiceError) throw choiceError;
+  for (const dc of desiredChoices) {
+    const ec = existingChoices.find((c) => c.label === dc.label);
+    if (!ec) {
+      const ins = await admin.from('market_choices').insert({
+        market_id: marketId,
+        label: dc.label,
+        odds: dc.odds,
+        previous_odds: null,
+        trend: 'stable',
+        is_suspended: false,
+        sort_order: dc.sort_order,
+      });
+      if (ins.error) throw ins.error;
+      continue;
+    }
+
+    const oldOdd = Number(ec.odds);
+    if (Math.abs(oldOdd - dc.odds) > 0.001) {
+      const upd = await admin
+        .from('market_choices')
+        .update({
+          odds: dc.odds,
+          previous_odds: oldOdd,
+          trend: dc.odds > oldOdd ? 'up' : 'down',
+        })
+        .eq('id', ec.id as string);
+      if (upd.error) throw upd.error;
+    }
   }
 }
 
