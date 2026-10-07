@@ -10,7 +10,8 @@
 import { describeSupabaseError, supabase } from '../lib/supabase';
 import type { UserAccount, DepositRequest, WithdrawRequest, HouseSettings } from '../types/auth';
 import type { Transaction } from '../types/betting';
-import type { Match, MatchStats, Market, OddChoice, SportId } from '../types/betting';
+import type { Match, MatchStats, Market, OddChoice, SportId, BetSelection, BetTicket } from '../types/betting';
+import { ELECTION_SCOPE_LABEL } from '../types/election';
 
 interface RowTeamRef {
   id: string;
@@ -823,6 +824,136 @@ export async function placeElectionBet(input: {
     potentialReturn: toNumber(row.potential_return),
     candidateName: row.candidate_name,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Minhas Apostas — leitura das apostas gravadas
+// ---------------------------------------------------------------------------
+
+interface RowBet {
+  id: string;
+  type: string;
+  status: string;
+  selections: unknown;
+  total_odds: number | string;
+  stake: number | string;
+  potential_return: number | string;
+  placed_at: string;
+  election_contest_id: string | null;
+}
+
+interface ElectionRef {
+  id: string;
+  title: string;
+  scope: 'PRESIDENT' | 'GOVERNOR';
+}
+
+const BET_STATUSES = ['OPEN', 'WON', 'LOST', 'CASHED_OUT', 'VOID'];
+
+function formatBetDate(iso: string): string {
+  const placed = new Date(iso);
+  const now = new Date();
+  const hh = String(placed.getHours()).padStart(2, '0');
+  const mm = String(placed.getMinutes()).padStart(2, '0');
+  if (placed.toDateString() === now.toDateString()) return `Hoje, ${hh}:${mm}`;
+  const yesterday = new Date(now.getTime() - 86_400_000);
+  if (placed.toDateString() === yesterday.toDateString()) return `Ontem, ${hh}:${mm}`;
+  return `${String(placed.getDate()).padStart(2, '0')}/${String(
+    placed.getMonth() + 1
+  ).padStart(2, '0')}, ${hh}:${mm}`;
+}
+
+/**
+ * Uma linha de `bets` vira um BetTicket do boletim.
+ *
+ * Selecao eleitoral gravada pelo `place_election_bet_atomic` nao tem odd dentro
+ * do jsonb (so candidateName/ids) — o preco mora em `bets.total_odds`, que e o
+ * que a aposta realmente usou. Titulo do contesto vem da vitrine ja carregada.
+ */
+function rowToTicket(row: RowBet, contests: ElectionRef[]): BetTicket {
+  const raw = Array.isArray(row.selections) ? (row.selections as Record<string, unknown>[]) : [];
+  const totalOdd = toNumber(row.total_odds);
+
+  const selections: BetSelection[] = raw.map((s, idx) => {
+    if (s.kind === 'election') {
+      const contestId = String(s.contestId ?? row.election_contest_id ?? '');
+      const contest = contests.find((c) => c.id === contestId);
+      const scope: 'PRESIDENT' | 'GOVERNOR' = s.scope === 'GOVERNOR' ? 'GOVERNOR' : 'PRESIDENT';
+      const candidateName = String(s.candidateName ?? '');
+      return {
+        kind: 'election',
+        electionContestId: contestId,
+        electionCandidateId: String(s.candidateId ?? ''),
+        matchId: contestId || 'election',
+        matchTitle: contest?.title ?? ELECTION_SCOPE_LABEL[scope],
+        homeTeam: candidateName,
+        awayTeam: '',
+        league: 'Eleições',
+        sport: 'politics',
+        isLive: false,
+        marketId: 'election-winner',
+        marketName: ELECTION_SCOPE_LABEL[scope],
+        choiceId: String(s.candidateId ?? `candidato-${idx}`),
+        choiceLabel: candidateName,
+        odd: totalOdd,
+        initialOdd: totalOdd,
+      };
+    }
+
+    return {
+      kind: 'match',
+      matchId: String(s.matchId ?? ''),
+      matchTitle: String(s.matchTitle ?? ''),
+      homeTeam: String(s.homeTeam ?? ''),
+      awayTeam: String(s.awayTeam ?? ''),
+      league: String(s.league ?? ''),
+      sport: (s.sport as SportId) ?? 'football',
+      isLive: Boolean(s.isLive),
+      minute: s.minute == null ? undefined : Number(s.minute),
+      marketId: String(s.marketId ?? ''),
+      marketName: String(s.marketName ?? ''),
+      choiceId: String(s.choiceId ?? `selecao-${idx}`),
+      choiceLabel: String(s.choiceLabel ?? ''),
+      odd: toNumber(s.odd ?? totalOdd),
+      initialOdd: toNumber(s.initialOdd ?? s.odd ?? totalOdd),
+    };
+  });
+
+  return {
+    id: row.id,
+    date: formatBetDate(row.placed_at),
+    type: row.type === 'multiple' ? 'multiple' : 'single',
+    selections,
+    totalOdd,
+    stake: toNumber(row.stake),
+    potentialReturn: toNumber(row.potential_return),
+    status: (BET_STATUSES.includes(row.status) ? row.status : 'OPEN') as BetTicket['status'],
+  };
+}
+
+/**
+ * Minhas Apostas vem do banco, nao de memoria: a mesma lista sobrevive a
+ * reload e mostra aposta esportiva e eleitoral no mesmo lugar.
+ *
+ * O filtro por `user_id` e obrigatorio aqui: a policy de admin le TODAS as
+ * apostas, e o admin nao quer a lista dos outros usuarios no proprio boletim.
+ */
+export async function fetchBets(
+  userId: string,
+  contests: ElectionRef[] = []
+): Promise<BetTicket[]> {
+  const { data, error } = await supabase
+    .from('bets')
+    .select(
+      'id, type, status, selections, total_odds, stake, potential_return, placed_at, election_contest_id'
+    )
+    .eq('user_id', userId)
+    .order('placed_at', { ascending: false })
+    .limit(100);
+
+  if (error) throw new Error(describeSupabaseError(error));
+
+  return ((data ?? []) as unknown as RowBet[]).map((row) => rowToTicket(row, contests));
 }
 
 /**

@@ -72,6 +72,15 @@ export interface Match {
 }
 
 export interface BetSelection {
+  /**
+   * 'election' = candidato (presidente/governador): nao tem partida, mercado de
+   * 1x2 nem odd dinamica, e so pode ir como aposta simples. O default e 'match'
+   * porque as linhas antigas do banco nao trazem o campo.
+   */
+  kind?: 'match' | 'election';
+  /** Somente eleicao: ids do contesto e do candidato em election_*. */
+  electionContestId?: string;
+  electionCandidateId?: string;
   matchId: string;
   matchTitle: string;
   homeTeam: string;
@@ -101,7 +110,7 @@ export interface BetTicket {
   potentialReturn: number;
   bonusPercentage?: number;
   bonusAmount?: number;
-  status: 'OPEN' | 'WON' | 'LOST' | 'CASHED_OUT';
+  status: 'OPEN' | 'WON' | 'LOST' | 'CASHED_OUT' | 'VOID';
   cashoutValue?: number;
   cashedOutAmount?: number;
   settledAt?: string;

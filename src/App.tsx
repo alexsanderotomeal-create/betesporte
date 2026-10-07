@@ -39,6 +39,7 @@ import {
   fetchWithdrawals,
   fetchLiveMatches,
   fetchElectionContests,
+  fetchBets,
   syncMatchFeed,
   placeBet,
   placeElectionBet,
@@ -71,7 +72,7 @@ import { AdminPanelPage } from './components/AdminPanelPage';
 import { ElectionOfficialModal } from './components/ElectionOfficialModal';
 import { ElectionShowcase } from './components/ElectionShowcase';
 import { ShieldCheck } from 'lucide-react';
-import { ElectionContest } from './types/election';
+import { ElectionContest, ElectionCandidate, ELECTION_SCOPE_LABEL } from './types/election';
 
 const INITIAL_TICKETS: BetTicket[] = [
   {
@@ -188,11 +189,15 @@ export default function App() {
   const [electionContests, setElectionContests] = useState<ElectionContest[]>([]);
   const [isElectionSubmitting, setIsElectionSubmitting] = useState<boolean>(false);
   const [electionError, setElectionError] = useState<string | null>(null);
-  /** Candidato escolhido na vitrine, para o modal abrir ja com a aposta. */
-  const [electionInitialPick, setElectionInitialPick] = useState<{
-    contestId: string;
-    candidateId: string;
-  } | null>(null);
+  /**
+   * Leva o boletim para uma aba. O numero incrementa para cada pedido (o
+   * painel pode ja estar aberto na aba certa); a aba diz se o clique quer ver
+   * o Boletim (selecao nova) ou Minhas Apostas (aposta confirmada).
+   */
+  const [slipFocus, setSlipFocus] = useState<{
+    n: number;
+    tab: 'slip' | 'my_bets';
+  }>({ n: 0, tab: 'my_bets' });
 
   /**
  * Partidas vem do Supabase.
@@ -263,10 +268,80 @@ export default function App() {
     }
   }, []);
 
-  const handleOpenElectionBet = (contestId: string, candidateId: string) => {
-    setElectionInitialPick({ contestId, candidateId });
-    setElectionError(null);
-    setIsElectionModalOpen(true);
+  /**
+   * Minhas Apostas vem de `bets`, nao da memoria.
+   *
+   * Antes o boletim so empurrava bilhete novo num estado local (e ainda por
+   * cima sem ler o localStorage de volta): aposta eleitoral nao aparecia em
+   * lugar nenhum e tudo sumia no reload. Agora a lista e sempre a do banco,
+   * com os contestos ja carregados para mostrar o titulo da eleicao.
+   */
+  const refreshBets = useCallback(
+    async (contests: ElectionContest[]) => {
+      if (!currentUser) {
+        setTickets([]);
+        return;
+      }
+      try {
+        setTickets(await fetchBets(currentUser.id, contests));
+      } catch {
+        // Sem rede ou consulta negada: mantem o que ja esta em tela.
+      }
+    },
+    // So o id entra nas deps: mudancas de saldo/role recriariam o callback e
+    // disparariam uma releitura de apostas a cada depósito.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentUser?.id]
+  );
+
+  // Carrega no login e quando os contestos eleitorais chegam (muda o titulo).
+  useEffect(() => {
+    void refreshBets(electionContests);
+  }, [refreshBets, electionContests]);
+
+  /**
+   * Clique no candidato da vitrine = mesmo gesto de clicar numa odd de jogo:
+   * entra no boletim (e sai se clicar de novo), sem popup no meio do caminho.
+   */
+  const handleToggleElectionSelection = (
+    contest: ElectionContest,
+    candidate: ElectionCandidate
+  ) => {
+    playSoundEffect('click');
+    setSelections((prev) => {
+      const match = (s: BetSelection) =>
+        s.kind === 'election' && s.matchId === contest.id && s.choiceId === candidate.id;
+
+      if (prev.some(match)) return prev.filter((s) => !match(s));
+
+      // Uma aposta por contesto, igual ao mercado de uma partida.
+      const filtered = prev.filter(
+        (s) => !(s.kind === 'election' && s.matchId === contest.id)
+      );
+
+      const newSelection: BetSelection = {
+        kind: 'election',
+        electionContestId: contest.id,
+        electionCandidateId: candidate.id,
+        matchId: contest.id,
+        matchTitle: contest.title,
+        homeTeam: candidate.name,
+        awayTeam: '',
+        league: 'Eleições',
+        sport: 'politics',
+        isLive: false,
+        marketId: 'election-winner',
+        marketName: ELECTION_SCOPE_LABEL[contest.scope],
+        choiceId: candidate.id,
+        choiceLabel: candidate.name,
+        odd: candidate.odds,
+        initialOdd: candidate.odds,
+      };
+
+      return [...filtered, newSelection];
+    });
+    // Mesmo gesto da odd de partida: o boletim assume a cena com a selecao la.
+    setSlipFocus((prev) => ({ n: prev.n + 1, tab: 'slip' }));
   };
 
   const handlePlaceElectionBet = async (
@@ -294,7 +369,12 @@ export default function App() {
     setToast('Aposta eleitoral registrada.');
     setIsElectionModalOpen(false);
     // Saldo e extrato sao relidos: o banco ja aplicou o debito.
-    if (currentUser) await loadAccountData(currentUser.id);
+    await loadAccountData(currentUser.id);
+    await refreshBets(electionContests);
+
+    // O usuario veu do popup: abre o boletim ja na aba Minhas Apostas.
+    setSlipFocus((prev) => ({ n: prev.n + 1, tab: 'my_bets' }));
+    setIsMobileSlipOpen(true);
   };
 
   const handleTriggerSync = async () => {
@@ -616,6 +696,52 @@ export default function App() {
     }
     if (currentSelections.length === 0) return false;
 
+    // Eleicao nao tem 1x2 nem market_choices: passa pelo RPC proprio, que so
+    // aceita uma selecao por vez. Combinada com jogo, o banco rejeitaria.
+    const electionSelection = currentSelections.find((s) => s.kind === 'election');
+    if (electionSelection) {
+      if (currentSelections.length > 1) {
+        setToast('Aposta eleitoral entra sozinha: remova as outras seleções do boletim.');
+        return false;
+      }
+
+      let placedElection: Awaited<ReturnType<typeof placeElectionBet>>;
+      try {
+        placedElection = await placeElectionBet({
+          contestId: electionSelection.electionContestId ?? electionSelection.matchId,
+          candidateId: electionSelection.electionCandidateId ?? electionSelection.choiceId,
+          stake,
+        });
+      } catch (err) {
+        setToast(toastMessage(err, 'Nao foi possivel registrar a aposta.'));
+        return false;
+      }
+
+      const now = new Date();
+      const electionTicket: BetTicket = {
+        id: placedElection.betId,
+        date: `Hoje, ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+        type: 'single',
+        selections: [
+          // Odd e retorno vem do banco, igual ao esportivo.
+          { ...electionSelection, odd: placedElection.odds, initialOdd: placedElection.odds },
+        ],
+        totalOdd: placedElection.odds,
+        stake,
+        potentialReturn: placedElection.potentialReturn,
+        bonusPercentage: 0,
+        bonusAmount: 0,
+        status: 'OPEN',
+      };
+
+      setSelections([]);
+      setTickets((prev) => [electionTicket, ...prev]);
+      await loadAccountData(currentUser.id);
+      await refreshBets(electionContests);
+      playSoundEffect('goal');
+      return true;
+    }
+
     let placed: Awaited<ReturnType<typeof placeBet>>;
     try {
       placed = await placeBet({
@@ -651,6 +777,9 @@ export default function App() {
 
     // Saldo e extrato vem do banco: recarrega em vez de somar por conta propria.
     await loadAccountData(currentUser.id);
+    // Bilhete novo ja veio do proprio insert; o refresh deixa a lista fiel ao
+    // banco (mesma origem da aposta eleitoral).
+    await refreshBets(electionContests);
     playSoundEffect('goal');
     return true;
   };
@@ -1097,7 +1226,8 @@ export default function App() {
           {selectedSport === 'politics' ? (
             <ElectionShowcase
               contests={electionContests}
-              onPick={handleOpenElectionBet}
+              onPick={handleToggleElectionSelection}
+              selectedSelections={selections}
             />
           ) : (
             <>
@@ -1130,6 +1260,7 @@ export default function App() {
           wallet={wallet}
           onPlaceBet={handlePlaceBet}
           tickets={tickets}
+          focusSignal={slipFocus}
           onCashOut={handleCashOut}
           onOpenDeposit={() => {
             if (!currentUser) {
@@ -1260,10 +1391,8 @@ export default function App() {
         onClose={() => {
           setIsElectionModalOpen(false);
           setElectionError(null);
-          setElectionInitialPick(null);
         }}
         contests={electionContests}
-        initialPick={electionInitialPick}
         error={electionError}
         isSubmitting={isElectionSubmitting}
         walletBalance={wallet.realBalance + wallet.bonusBalance}

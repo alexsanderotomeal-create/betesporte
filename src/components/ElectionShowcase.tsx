@@ -5,18 +5,21 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
-  ArrowRight,
 } from 'lucide-react';
 import {
   ElectionContest,
+  ElectionCandidate,
   electionTrend,
   ELECTION_SOURCE_NOTE,
 } from '../types/election';
+import { BetSelection } from '../types/betting';
 
 interface ElectionShowcaseProps {
   contests: ElectionContest[];
-  /** Abre a aposta no modal ja com candidato escolhido. */
-  onPick: (contestId: string, candidateId: string) => void;
+  /** Mesmo gesto de uma odd de jogo: alterna a selecao dentro do boletim. */
+  onPick: (contest: ElectionContest, candidate: ElectionCandidate) => void;
+  /**Selecoes ja no boletim, para marcar o candidato escolhido. */
+  selectedSelections?: BetSelection[];
 }
 
 /**
@@ -24,12 +27,13 @@ interface ElectionShowcaseProps {
  *
  * Quando o usuario escolhe "Eleicoes", esta lista aparece na area principal —
  * antes, so existia um banner e uma lista de partidas vazia: os candidatos
- * ficavam presos no modal. Aqui cada candidato e um botao de cotacao; o toque
- * abre o modal de aposta ja com o candidato selecionado.
+ * ficavam presos no modal. Aqui cada candidato e um botao de cotacao com o
+ * mesmo comportamento das odds de partida: clica e entra no boletim.
  */
 export const ElectionShowcase: React.FC<ElectionShowcaseProps> = ({
   contests,
   onPick,
+  selectedSelections = [],
 }) => {
   if (contests.length === 0) {
     return (
@@ -41,6 +45,11 @@ export const ElectionShowcase: React.FC<ElectionShowcaseProps> = ({
 
   const president = contests.find(c => c.scope === 'PRESIDENT');
   const governors = contests.filter(c => c.scope === 'GOVERNOR');
+
+  const isPicked = (contest: ElectionContest, candidate: ElectionCandidate) =>
+    selectedSelections.some(
+      s => s.kind === 'election' && s.matchId === contest.id && s.choiceId === candidate.id
+    );
 
   const renderContest = (contest: ElectionContest, highlight = false) => (
     <div
@@ -62,12 +71,17 @@ export const ElectionShowcase: React.FC<ElectionShowcaseProps> = ({
       <div className="flex flex-col gap-1.5">
         {contest.candidates.map((candidate, idx) => {
           const trend = electionTrend(candidate.odds, candidate.previousOdds);
+          const picked = isPicked(contest, candidate);
           return (
             <button
               key={candidate.id}
-              onClick={() => onPick(contest.id, candidate.id)}
-              className="p-2.5 rounded-lg border border-[#21262d] bg-[#10141d] hover:border-[#00e701]/60 hover:bg-[#00e701]/5 flex items-center justify-between gap-2 text-left transition-colors cursor-pointer"
-              title={`Apostar em ${candidate.name}`}
+              onClick={() => onPick(contest, candidate)}
+              className={`p-2.5 rounded-lg border flex items-center justify-between gap-2 text-left transition-colors cursor-pointer ${
+                picked
+                  ? 'border-[#00e701] bg-[#00e701]/10'
+                  : 'border-[#21262d] bg-[#10141d] hover:border-[#00e701]/60 hover:bg-[#00e701]/5'
+              }`}
+              title={`${picked ? 'Remover do boletim' : 'Apostar em'} ${candidate.name}`}
             >
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 <span className="w-5 h-5 rounded-full bg-[#1c2331] text-[10px] font-mono font-bold flex items-center justify-center text-slate-400 shrink-0">
@@ -105,7 +119,16 @@ export const ElectionShowcase: React.FC<ElectionShowcaseProps> = ({
                 <span className="font-mono text-sm font-extrabold text-[#00e701]">
                   {candidate.odds.toFixed(2)}
                 </span>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
+                <span
+                  className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] font-bold ${
+                    picked
+                      ? 'bg-[#00e701] border-[#00e701] text-black'
+                      : 'border-[#30363d] text-slate-600'
+                  }`}
+                  aria-hidden="true"
+                >
+                  {picked ? '✓' : ''}
+                </span>
               </div>
             </button>
           );
@@ -135,7 +158,7 @@ export const ElectionShowcase: React.FC<ElectionShowcaseProps> = ({
       )}
 
       <p className="text-[10px] text-slate-500 text-center">
-        Toque em um candidato para abrir a aposta.
+        Toque em um candidato para adicioná-lo ao boletim.
       </p>
     </div>
   );
