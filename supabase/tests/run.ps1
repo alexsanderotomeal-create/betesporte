@@ -3,23 +3,25 @@
 # reexecutaveis) e executa os testes de fluxo financeiro/eleitoral em
 # supabase/tests/financial_flows.sql.
 #
+#   pwsh -File supabase/tests/run.ps1        (CI / Linux)
 #   powershell -ExecutionPolicy Bypass -File supabase\tests\run.ps1
 #
-# A lista de migrations vem do diretorio: migration nova entra no harness so de
-# existir o arquivo. Sai com exit code != 0 se qualquer migration ou qualquer
-# assert falhar.
+# Caminho com / de proposito: Windows aceita / e o pwsh do CI roda em Linux,
+# onde \ nao e separador. A lista de migrations vem do diretorio: migration nova
+# entra no harness so de existir o arquivo. Sai com exit code != 0 se qualquer
+# migration ou qualquer assert falhar.
 param([switch]$KeepDb)
 $ErrorActionPreference = "Continue"
-$here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$root = Resolve-Path (Join-Path $here '..\..')
+$here = Split-Path -Parent $PSCommandPath
+$root = (Resolve-Path (Join-Path $here '../..')).Path
 $img  = 'primasbet-pg'
 
-$migrations = Get-ChildItem "$root\supabase\migrations\*.sql" |
+$migrations = Get-ChildItem (Join-Path $root 'supabase/migrations/*.sql') |
   Sort-Object Name |
   Select-Object -ExpandProperty Name
 
 if (-not $migrations) {
-  "Nenhuma migration encontrada em $root\supabase\migrations"
+  "Nenhuma migration encontrada em $root/supabase/migrations"
   exit 1
 }
 
@@ -30,10 +32,10 @@ if (-not $KeepDb) {
   docker exec $img pg_isready -U postgres | Out-Null
 }
 
-docker cp "$here\schema_stub.sql" "${img}:/tmp/" | Out-Null
-docker cp "$here\financial_flows.sql" "${img}:/tmp/" | Out-Null
+docker cp (Join-Path $here 'schema_stub.sql') "${img}:/tmp/" | Out-Null
+docker cp (Join-Path $here 'financial_flows.sql') "${img}:/tmp/" | Out-Null
 foreach ($m in $migrations) {
-  docker cp "$root\supabase\migrations\$m" "${img}:/tmp/" | Out-Null
+  docker cp (Join-Path $root "supabase/migrations/$m") "${img}:/tmp/" | Out-Null
 }
 
 # O stub de schema roda uma vez so; as migrations do projeto, duas.

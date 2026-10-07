@@ -26,4 +26,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: harness (stub + migrations 2x + asserts)
         shell: pwsh
-        run: ./supabase/tests/run.ps1
+        run: |
+          ./supabase/tests/run.ps1 2>&1 | Tee-Object -Variable log
+          if ($LASTEXITCODE -ne 0) {
+            # sem acesso aos logs da run via API, o summary e a pista de diagnostico
+            $log | Select-Object -Last 40 |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+          exit $LASTEXITCODE
