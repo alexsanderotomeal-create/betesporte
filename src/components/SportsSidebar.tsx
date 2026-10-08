@@ -7,7 +7,7 @@ import {
   ChevronRight, 
   ShieldAlert
 } from 'lucide-react';
-import { SportId } from '../types/betting';
+import { Match, SportId } from '../types/betting';
 
 interface SportsSidebarProps {
   selectedSport: string;
@@ -17,7 +17,20 @@ interface SportsSidebarProps {
   liveMatchesCount: number;
   timeFilter: string;
   onSelectTimeFilter: (filter: string) => void;
+  matches: Match[];
+  electionCount: number;
 }
+
+const COUNTRY_FLAGS: Record<string, string> = {
+  Brasil: '🇧🇷',
+  Inglaterra: '🏴󠁧󠁢󠁥󠁮󠁧󠁿',
+  Espanha: '🇪🇸',
+  Italia: '🇮🇹',
+  EUA: '🇺🇸',
+  'Estados Unidos': '🇺🇸',
+  Europa: '🇪🇺',
+  Internacional: '🌐',
+};
 
 export const SportsSidebar: React.FC<SportsSidebarProps> = ({
   selectedSport,
@@ -27,27 +40,49 @@ export const SportsSidebar: React.FC<SportsSidebarProps> = ({
   liveMatchesCount,
   timeFilter,
   onSelectTimeFilter,
+  matches,
+  electionCount,
 }) => {
-  const sports = [
-    { id: 'all', name: 'Todos os Esportes', icon: '🌐', count: 9 },
-    { id: 'politics', name: 'Eleições Presidenciais', icon: '🗳️', count: 2 },
-    { id: 'football', name: 'Futebol', icon: '⚽', count: 4 },
-    { id: 'basketball', name: 'Basquete', icon: '🏀', count: 1 },
-    { id: 'tennis', name: 'Tênis', icon: '🎾', count: 1 },
-    { id: 'esports', name: 'E-Sports', icon: '🎮', count: 1 },
-    { id: 'volleyball', name: 'Vôlei', icon: '🏐', count: 0 },
-    { id: 'mma', name: 'MMA / UFC', icon: '🥊', count: 0 },
-  ];
+  // Contagens reais por esporte: chegam a 0 quando nao ha jogo — o numero
+  // fixo antigo mentia (Tênis/E-Sports exibiam 1 com zero partidas).
+  const sportCounts = React.useMemo(() => {
+    const counts: Record<string, number> = { all: matches.length, politics: electionCount };
+    matches.forEach((m) => {
+      counts[m.sport] = (counts[m.sport] ?? 0) + 1;
+    });
+    return counts;
+  }, [matches, electionCount]);
 
-  const featuredLeagues = [
-    { name: 'Eleições Presidenciais', country: '🇧🇷 Brasil', sport: 'politics' },
-    { name: 'Brasileirão Série A', country: '🇧🇷 Brasil', sport: 'football' },
-    { name: 'UEFA Champions League', country: '🇪🇺 Europa', sport: 'football' },
-    { name: 'Premier League', country: '🏴󠁧󠁢󠁥󠁮󠁧󠁿 Inglaterra', sport: 'football' },
-    { name: 'NBA', country: '🇺🇸 EUA', sport: 'basketball' },
-    { name: 'CS2 Major Championship', country: '🌐 Internacional', sport: 'esports' },
-    { name: 'ATP Masters 1000', country: '🌐 Tênis', sport: 'tennis' },
-  ];
+  const sports = [
+    { id: 'all', name: 'Todos os Esportes', icon: '🌐' },
+    { id: 'politics', name: 'Eleições Presidenciais', icon: '🗳️' },
+    { id: 'football', name: 'Futebol', icon: '⚽' },
+    { id: 'basketball', name: 'Basquete', icon: '🏀' },
+    { id: 'tennis', name: 'Tênis', icon: '🎾' },
+    { id: 'esports', name: 'E-Sports', icon: '🎮' },
+    { id: 'volleyball', name: 'Vôlei', icon: '🏐' },
+    { id: 'mma', name: 'MMA / UFC', icon: '🥊' },
+  ].map((sp) => ({ ...sp, count: sportCounts[sp.id] ?? 0 }));
+
+  // Ligas montadas a partir dos dados: o clique sempre bate com o nome
+  // exato de m.league (o filtro do App compara por igualdade). Eleições fica
+  // fixa no topo — a vitrine abre pelo esporte, não pela liga. Ordena por
+  // nº de partidas, da maior para a menor.
+  const featuredLeagues = React.useMemo(() => {
+    const byLeague = new Map<string, { name: string; country: string; sport: string; count: number }>();
+    matches.forEach((m) => {
+      if (m.sport === 'politics') return;
+      const key = `${m.sport}|${m.league}`;
+      const entry = byLeague.get(key);
+      if (entry) entry.count += 1;
+      else byLeague.set(key, { name: m.league, country: m.country, sport: m.sport, count: 1 });
+    });
+    const fromData = [...byLeague.values()].sort((a, b) => b.count - a.count);
+    return [
+      { name: 'Eleições Presidenciais', country: 'Brasil', sport: 'politics', count: electionCount },
+      ...fromData,
+    ];
+  }, [matches, electionCount]);
 
   return (
     <aside className="w-full lg:w-64 shrink-0 flex flex-col gap-4 text-slate-300">
@@ -145,9 +180,17 @@ export const SportsSidebar: React.FC<SportsSidebarProps> = ({
             >
               <div className="flex flex-col truncate pr-2">
                 <span className="truncate">{league.name}</span>
-                <span className="text-[10px] text-slate-500">{league.country}</span>
+                {league.country && (
+                  <span className="text-[10px] text-slate-500">
+                    {COUNTRY_FLAGS[league.country] ? `${COUNTRY_FLAGS[league.country]} ` : ''}
+                    {league.country}
+                  </span>
+                )}
               </div>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[11px] font-mono text-slate-500">{league.count}</span>
+                <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
+              </div>
             </button>
           ))}
         </div>

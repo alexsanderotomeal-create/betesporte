@@ -57,6 +57,15 @@ function toastMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
+/**
+ * Chave de comparação de liga sem acento/maiúscula: o filtro por liga é uma
+ * igualdade, e o nome que chega do feed ('Brasileirao Serie A') não casa com
+ * a versão acentuada exibida em outros lugares ('Brasileirão Série A').
+ */
+function leagueKey(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
 import { Header } from './components/Header';
 import { SportsSidebar } from './components/SportsSidebar';
 import { LivePitchTracker } from './components/LivePitchTracker';
@@ -1097,7 +1106,7 @@ export default function App() {
       }
 
       // League filter
-      if (selectedLeague !== 'all' && m.league !== selectedLeague) return false;
+      if (selectedLeague !== 'all' && leagueKey(m.league) !== leagueKey(selectedLeague)) return false;
 
       // Time filter
       if (timeFilter === 'live' && m.status !== 'LIVE') return false;
@@ -1188,6 +1197,8 @@ export default function App() {
           liveMatchesCount={liveCount}
           timeFilter={timeFilter}
           onSelectTimeFilter={setTimeFilter}
+          matches={matches}
+          electionCount={electionContests.length}
         />
 
         {/* Center Main: Live Pitch Tracker + Match Cards */}
