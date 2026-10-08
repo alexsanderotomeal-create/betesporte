@@ -193,6 +193,8 @@ async function runSyncPass(admin: ReturnType<typeof createClient>) {
           : '';
       if (details) message = `${message} [detalhe: ${details}]`;
       if (code) message = `${message} [codigo: ${code}]`;
+      message = `${league.sport}/${league.slug}: ${message}`;
+      console.error(`sync falhou em ${league.sport}/${league.slug}:`, err);
       results.lastError = results.lastError
         ? `${results.lastError} | ${message}`
         : message;
@@ -399,6 +401,17 @@ async function refreshSuperOdd(
 
 const ESPN_HOST = 'https://site.api.espn.com/apis/site/v2/sports';
 
+// Janela do feed: de ontem (liquidacao de encerrados) ate FIXTURE_DAYS_AHEAD
+// dias de fixtures. Um unico ponto de definicao para fetch e persistencia.
+const FIXTURE_DAYS_AHEAD = 10;
+// Limite pedido a ESPN por request; a resposta ordenada do inicio do mes e
+// cortada aqui — detectado pelo tamanho para acionar o fallback dia-a-dia.
+const SCOREBOARD_LIMIT = 250;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 interface EspnTeam {
   id: string;
   displayName: string;
@@ -523,14 +536,13 @@ async function fetchScoreboard(sport: string, slug: string): Promise<EspnEvent[]
   const espnSport = sport === 'football' ? 'soccer' : sport;
   // A ESPN so aceita `dates=YYYYMMDD` (dia) ou `YYYYMM` (mes) — range nao
   // existe. O mes inteiro em um request cobre ontem (liquidacao de jogos
-  // encerrados), hoje e o horizonte de fixtures dos proximos 10 dias, com a
-  // metade dos requests da versao dia-a-dia. A janela de persistencia (ver
-  // persistEvent) e quem corta o restante do mes.
+  // encerrados), hoje e o horizonte de fixtures, com metade dos requests da
+  // versao dia-a-dia. A janela de persistencia (persistEvent) corta o resto.
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
   const months = [
     ...new Set(
-      [now - dayMs, now, now + 10 * dayMs].map((t) =>
+      [now - dayMs, now, now + FIXTURE_DAYS_AHEAD * dayMs].map((t) =>
         new Date(t).toISOString().slice(0, 7).replace('-', '')
       )
     ),
@@ -538,22 +550,45 @@ async function fetchScoreboard(sport: string, slug: string): Promise<EspnEvent[]
 
   const merged: EspnEvent[] = [];
   const seen = new Set<string>();
-  for (const month of months) {
-    const events = await fetchScoreboardDay(espnSport, slug, month);
+  const addAll = (events: EspnEvent[]) => {
     for (const event of events) {
       if (seen.has(event.id)) continue;
       seen.add(event.id);
       merged.push(event);
     }
-    // Evita rajada para o CDN da ESPN entre meses.
-    if (months.length > 1) await new Promise((resolve) => setTimeout(resolve, 350));
+  };
+
+  let capped = false;
+  for (const month of months) {
+    const events = await fetchScoreboardDay(espnSport, slug, month);
+    addAll(events);
+    // ESPN ordena do inicio do mes e corta em SCOREBOARD_LIMIT: ligas densas
+    // (Volei NCAA, ~44 jogos/dia) devolvem so comeco de mes — tudo fora da
+    // janela — e os fixtures reais ficam cortados. Detectou o corte, refaz
+    // dia a dia nos dias da janela (12 requests, dedupe por id).
+    if (events.length >= SCOREBOARD_LIMIT) {
+      capped = true;
+      break;
+    }
+    if (months.length > 1) await sleep(350);
   }
+
+  if (capped) {
+    console.log(`scoreboard ${slug}: limite de ${SCOREBOARD_LIMIT} atingido, fallback dia-a-dia`);
+    merged.length = 0;
+    seen.clear();
+    for (let i = -1; i <= FIXTURE_DAYS_AHEAD; i++) {
+      const day = new Date(now + i * dayMs).toISOString().slice(0, 10).replace(/-/g, '');
+      addAll(await fetchScoreboardDay(espnSport, slug, day));
+      await sleep(200);
+    }
+  }
+
   return merged;
 }
 
 async function fetchScoreboardDay(espnSport: string, slug: string, dates: string): Promise<EspnEvent[]> {
-  // limit=250: sem ele a ESPN corta em 100 eventos (cabe em um mes de NBA).
-  const url = `${ESPN_HOST}/${espnSport}/${encodeURIComponent(slug)}/scoreboard?dates=${dates}&limit=250`;
+  const url = `${ESPN_HOST}/${espnSport}/${encodeURIComponent(slug)}/scoreboard?dates=${dates}&limit=${SCOREBOARD_LIMIT}`;
 
   // ESPN devolve 403 para o User-Agent padrao do Deno; um User-Agent de
   // navegador passa. Sem chave, sem cookie — so o feed publico.
@@ -639,36 +674,51 @@ async function loadExistingMatches(
   const map = new Map<string, Record<string, unknown>>();
   if (externalIds.length === 0) return map;
 
-  const { data: matches, error } = await admin
-    .from('matches')
-    .select('id, external_id, league_id, home_team_id, away_team_id, status, kickoff_at, minute, home_score, away_score, margin')
-    .in('external_id', externalIds);
-  if (error) throw error;
+  // A PostgREST monta ?in.(...) na query string: passar de ~500 ids estoura
+  // o limite de URI do fetch ("URI too long"). O volei NCAA chega a ~530
+  // jogos na janela, entao cada select e fatiado em pedacos de 150.
+  const CHUNK = 150;
+  const chunks = (ids: string[]): string[][] => {
+    const out: string[][] = [];
+    for (let i = 0; i < ids.length; i += CHUNK) out.push(ids.slice(i, i + CHUNK));
+    return out;
+  };
 
-  for (const m of matches ?? []) {
-    if (m.external_id) map.set(m.external_id, { ...m, markets: [] });
+  const matchRows: Array<Record<string, unknown>> = [];
+  for (const chunk of chunks(externalIds)) {
+    const { data, error } = await admin
+      .from('matches')
+      .select('id, external_id, league_id, home_team_id, away_team_id, status, kickoff_at, minute, home_score, away_score, margin')
+      .in('external_id', chunk);
+    if (error) throw error;
+    matchRows.push(...(data ?? []));
   }
 
-  const matchRows = matches ?? [];
+  for (const m of matchRows) {
+    if (m.external_id) map.set(String(m.external_id), { ...m, markets: [] });
+  }
   if (matchRows.length === 0) return map;
-  const matchIds = matchRows.map((m: { id: string }) => m.id);
 
-  const { data: markets, error: mErr } = await admin
-    .from('match_markets')
-    .select('id, match_id, name, category')
-    .in('match_id', matchIds);
-  if (mErr) throw mErr;
+  const matchIds = matchRows.map((m) => String(m.id));
+  const marketRows: Array<Record<string, unknown>> = [];
+  for (const chunk of chunks(matchIds)) {
+    const { data, error } = await admin
+      .from('match_markets')
+      .select('id, match_id, name, category')
+      .in('match_id', chunk);
+    if (error) throw error;
+    marketRows.push(...(data ?? []));
+  }
 
-  const marketRows = markets ?? [];
-  const marketIds = marketRows.map((m: { id: string }) => m.id);
+  const marketIds = marketRows.map((m) => String(m.id));
   const choicesByMarket = new Map<string, Array<Record<string, unknown>>>();
-  if (marketIds.length > 0) {
-    const { data: choices, error: cErr } = await admin
+  for (const chunk of chunks(marketIds)) {
+    const { data, error } = await admin
       .from('market_choices')
       .select('id, market_id, label, odds, previous_odds, trend, is_suspended, sort_order')
-      .in('market_id', marketIds);
-    if (cErr) throw cErr;
-    for (const c of choices ?? []) {
+      .in('market_id', chunk);
+    if (error) throw error;
+    for (const c of data ?? []) {
       const arr = choicesByMarket.get(c.market_id) ?? [];
       arr.push(c);
       choicesByMarket.set(c.market_id, arr);
@@ -684,7 +734,7 @@ async function loadExistingMatches(
   for (const m of matchRows) {
     const key = m.external_id;
     if (!key) continue;
-    map.set(key, { ...map.get(key), markets: marketsByMatch.get(m.id) ?? [] });
+    map.set(String(key), { ...map.get(String(key)), markets: marketsByMatch.get(String(m.id)) ?? [] });
   }
   return map;
 }
@@ -868,7 +918,7 @@ async function persistEvent(
   if (
     !Number.isFinite(kickoffMs) ||
     kickoffMs < startOfYesterdayMs() ||
-    kickoffMs > Date.now() + 10 * 24 * 3_600_000
+    kickoffMs > Date.now() + FIXTURE_DAYS_AHEAD * 24 * 3_600_000
   ) {
     return 'skipped';
   }

@@ -1034,10 +1034,11 @@ export async function fetchLiveMatches(): Promise<Match[]> {
     )
     .in('status', ['OPEN', 'LIVE'])
     .order('kickoff_at', { ascending: true })
-    // Feed ampliado (10 ligas de futebol + NBA + volei + tenis + MMA) com
-    // fixtures de 10 dias: hoje sao ~180 abertas e o antigo corte de 60
-    // deixava esportes inteiros fora do boletim e das contagens da sidebar.
-    .limit(300);
+    // Feed ampliado (17 ligas: futebol europeu + NBA + volei + tenis + MMA)
+    // com fixtures de 10 dias: o volei NCAA sozinho tem ~600 abertas na
+    // janela; cortes menores (60, depois 300) deixavam esportes inteiros e
+    // as finais de semana de fora do boletim e das contagens da sidebar.
+    .limit(900);
 
   if (error) throw new Error(describeSupabaseError(error));
   return ((data ?? []) as unknown as RowMatch[]).map(toMatch);
