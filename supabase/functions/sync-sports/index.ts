@@ -189,6 +189,14 @@ async function runSyncPass(admin: ReturnType<typeof createClient>) {
     await new Promise((resolve) => setTimeout(resolve, 350));
   }
 
+  // Super Odd Turbinada: escolhe os alvos do dia, aplica o boost REAL na odd
+  // (morada em market_choices) e grava a campanha para o front montar o banner.
+  try {
+    await refreshSuperOdd(admin);
+  } catch (err) {
+    console.error('super_odd refresh failed', err);
+  }
+
   const nowIso = new Date().toISOString();
   const { error: upsertError } = await admin.from('system_settings').upsert(
     { key: 'sports_last_sync', value: nowIso, updated_at: nowIso },
@@ -223,6 +231,154 @@ async function loadHouseMargin(
   const parsed = Number(data?.value);
   if (Number.isFinite(parsed) && parsed > 1 && parsed < 2) return parsed;
   return 1.05;
+}
+
+/**
+ * Super Odd Turbinada.
+ *
+ * Escolhe dois jogos de futebol abertos nas proximas 24h (prefere Flamengo e
+ * Real Madrid), aplica um boost REAL de 1.25 na odd "Mais de X" de um dos
+ * lados e grava a campanha em system_settings ('super_odd') para o banner do
+ * front montar titulo e cotacoes.
+ *
+ * A odd turbinada mora em market_choices: boletim, place_bet_atomic e
+ * liquidacao continuam lendo o preco do banco sem regra especial — o que a
+ * tela promete e o que o banco paga. O diff normal do sync rebaixa a linha ao
+ * valor justo a cada passada, entao reaplicar o boost aqui e idempotente
+ * (a campanha anterior guarda a base para nao turbinar em dobro).
+ */
+async function refreshSuperOdd(
+  admin: ReturnType<typeof createClient>
+): Promise<boolean> {
+  const BOOST = 1.25;
+  const PREF = ['flamengo', 'real madrid'];
+  const now = Date.now();
+
+  const { data, error } = await admin
+    .from('matches')
+    .select(
+      `
+      id, kickoff_at,
+      home:teams!matches_home_team_id_fkey ( name ),
+      away:teams!matches_away_team_id_fkey ( name ),
+      league:leagues ( sport ),
+      match_markets ( id, category, market_choices ( id, label, odds ) )
+    `
+    )
+    .eq('status', 'OPEN')
+    .order('kickoff_at', { ascending: true })
+    .limit(80);
+  if (error) throw error;
+
+  interface PromoRow {
+    id: string;
+    kickoff_at: string;
+    home: { name: string } | null;
+    away: { name: string } | null;
+    league: { sport: string } | null;
+    match_markets: Array<{
+      id: string;
+      category: string;
+      market_choices: Array<{ id: string; label: string; odds: number | string }>;
+    }>;
+  }
+
+  const overOf = (row: PromoRow) => {
+    const goals = row.match_markets.find((mk) => mk.category === 'goals');
+    const choice = goals?.market_choices.find((c) => c.label.startsWith('Mais de'));
+    return goals && choice ? { goals, choice } : null;
+  };
+
+  const rows = (data ?? []) as unknown as PromoRow[];
+  const cands = rows.filter((row) => {
+    const kickoff = Date.parse(row.kickoff_at);
+    return (
+      row.league?.sport === 'football' &&
+      Number.isFinite(kickoff) &&
+      kickoff > now &&
+      kickoff < now + 24 * 3_600_000 &&
+      Boolean(overOf(row))
+    );
+  });
+
+  const names = (row: PromoRow) =>
+    `${row.home?.name ?? ''} ${row.away?.name ?? ''}`.toLowerCase();
+  const preferred = cands.filter((row) => PREF.some((p) => names(row).includes(p)));
+  const targets = [
+    ...preferred,
+    ...cands.filter((row) => !preferred.includes(row)),
+  ].slice(0, 2);
+
+  const upsertCampaign = (payload: Record<string, unknown>) =>
+    admin
+      .from('system_settings')
+      .upsert(
+        {
+          key: 'super_odd',
+          value: JSON.stringify(payload),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'key' }
+      );
+
+  if (targets.length < 2) {
+    const { error: upd } = await upsertCampaign({ enabled: false });
+    if (upd) throw upd;
+    return false;
+  }
+
+  let previous: { boosted_choice_id?: string; boosted_base?: number } = {};
+  const { data: prevRow } = await admin
+    .from('system_settings')
+    .select('value')
+    .eq('key', 'super_odd')
+    .maybeSingle();
+  if (prevRow?.value) {
+    try {
+      previous = JSON.parse(prevRow.value) as typeof previous;
+    } catch {
+      // campanha corrompida: trata como inexistente
+    }
+  }
+
+  const legA = overOf(targets[0]);
+  const legB = overOf(targets[1]);
+  if (!legA || !legB) return false;
+
+  const current = Number(legA.choice.odds);
+  // Se a linha atual ainda e a turbinada da passada anterior, a base e a
+  // registrada; senao o diff ja devolveu o justo e a base e o valor atual.
+  let base = current;
+  if (previous.boosted_choice_id === legA.choice.id && previous.boosted_base) {
+    const expected = Math.max(1.01, round2(previous.boosted_base * BOOST));
+    if (Math.abs(current - expected) < 0.02) base = previous.boosted_base;
+  }
+  const boosted = Math.max(1.01, round2(base * BOOST));
+
+  if (Math.abs(current - boosted) > 0.001) {
+    const { error: upd } = await admin
+      .from('market_choices')
+      .update({
+        odds: boosted,
+        previous_odds: current,
+        trend: boosted > current ? 'up' : 'down',
+      })
+      .eq('id', legA.choice.id);
+    if (upd) throw upd;
+  }
+
+  const { error: upd } = await upsertCampaign({
+    enabled: true,
+    match_ids: [targets[0].id, targets[1].id],
+    choice_ids: [legA.choice.id, legB.choice.id],
+    boosted_choice_id: legA.choice.id,
+    boosted_base: base,
+    base_total: round2(base * Number(legB.choice.odds)),
+    boosted_total: round2(boosted * Number(legB.choice.odds)),
+    updated_at: new Date().toISOString(),
+  });
+  if (upd) throw upd;
+  return true;
 }
 
 // ---------------------------------------------------------------------------

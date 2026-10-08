@@ -8,7 +8,8 @@ import {
   Transaction, 
   Market, 
   OddChoice, 
-  ApiConnectionConfig 
+  ApiConnectionConfig,
+  SuperOddPromo
 } from './types/betting';
 import { 
   UserAccount, 
@@ -39,6 +40,8 @@ import {
   fetchTransactions,
   fetchWithdrawals,
   fetchLiveMatches,
+  fetchSuperOdd,
+  SuperOddConfig,
   fetchElectionContests,
   fetchBets,
   syncMatchFeed,
@@ -140,6 +143,11 @@ export default function App() {
 
   // Database Sync & Mercado Eleitoral
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  /**
+   * Campanha Super Odd Turbinada (system_settings). Resolvida contra `matches`
+   * num memo — sem os dois jogos carregados nao ha banner nem aposta.
+   */
+  const [superOddConfig, setSuperOddConfig] = useState<SuperOddConfig | null>(null);
   const [isElectionModalOpen, setIsElectionModalOpen] = useState<boolean>(false);
   const [electionContests, setElectionContests] = useState<ElectionContest[]>([]);
   const [isElectionSubmitting, setIsElectionSubmitting] = useState<boolean>(false);
@@ -170,6 +178,7 @@ export default function App() {
       .catch(() => {
         // Sem partidas no banco (ou RLS fechada): mantem o estado inicial.
       });
+    fetchSuperOdd().then(setSuperOddConfig);
 
     loadElectionContests();
   }, []);
@@ -190,8 +199,10 @@ export default function App() {
       try {
         await syncMatchFeed();
         if (cancelled) return;
-        const live = await fetchLiveMatches();
-        if (!cancelled && live.length > 0) setMatches(live);
+        const [live, promo] = await Promise.all([fetchLiveMatches(), fetchSuperOdd()]);
+        if (cancelled) return;
+        if (live.length > 0) setMatches(live);
+        setSuperOddConfig(promo);
       } catch {
         // silencioso: round seguinte tenta de novo
       }
@@ -1085,6 +1096,46 @@ export default function App() {
     setMatches((prev) => prev.map((m) => updateMatchOddsDynamically(m)));
   };
 
+  /**
+   * Super Odd Turbinada resolvida: a campanha vem do banco (sync grava a odd
+   * turbinada de verdade em market_choices), e aqui os ids sao apontados
+   * contra o catalogo carregado. Sem as duas pernas em memoria, sem banner —
+   * o botao sempre leva exatamente os jogos anunciados.
+   */
+  const superOdd = useMemo<SuperOddPromo | null>(() => {
+    if (!superOddConfig) return null;
+
+    const legFor = (matchId: string, choiceId: string) => {
+      const match = matches.find((m) => m.id === matchId);
+      if (!match || match.status === 'FINISHED') return null;
+      const market = match.markets.find((mk) =>
+        mk.choices.some((c) => c.id === choiceId)
+      );
+      const choice = market?.choices.find((c) => c.id === choiceId);
+      return market && choice ? { match, market, choice } : null;
+    };
+
+    const legA = legFor(superOddConfig.match_ids[0], superOddConfig.choice_ids[0]);
+    const legB = legFor(superOddConfig.match_ids[1], superOddConfig.choice_ids[1]);
+    if (!legA || !legB) return null;
+
+    // O time anunciado e o preferido da campanha (Flamengo / Real Madrid)
+    // quando joga; senao o mandante.
+    const preferred = ['flamengo', 'real madrid'];
+    const side = (m: Match) =>
+      preferred.find((p) => m.homeTeam.toLowerCase().includes(p)) ||
+      preferred.find((p) => m.awayTeam.toLowerCase().includes(p)) ||
+      m.homeTeam;
+    const goals = legA.choice.label.replace(/\s*Gols?$/i, '').toLowerCase();
+
+    return {
+      legs: [legA, legB],
+      title: `${side(legA.match)} & ${side(legB.match)}: ${goals} em ambos os jogos`,
+      baseTotal: superOddConfig.base_total,
+      boostedTotal: superOddConfig.boosted_total,
+    };
+  }, [matches, superOddConfig]);
+
   // Filtered Matches
   const filteredMatches = useMemo(() => {
     return matches.filter((m) => {
@@ -1112,11 +1163,17 @@ export default function App() {
       if (timeFilter === 'live' && m.status !== 'LIVE') return false;
       if (timeFilter === 'today' && !m.startTime.includes('Hoje')) return false;
       if (timeFilter === 'tomorrow' && !m.startTime.includes('Amanhã')) return false;
-      if (timeFilter === 'hot' && !m.isSuperOdd) return false;
+      if (
+        timeFilter === 'hot' &&
+        !m.isSuperOdd &&
+        !superOdd?.legs.some((leg) => leg.match.id === m.id)
+      ) {
+        return false;
+      }
 
       return true;
     });
-  }, [matches, searchQuery, selectedSport, selectedLeague, timeFilter]);
+  }, [matches, searchQuery, selectedSport, selectedLeague, timeFilter, superOdd]);
 
   // Pagina exclusiva do backoffice: substitui o site inteiro enquanto aberta.
   // So e alcançada pelo dropdown do admin; qualquer outro perfil cai de volta
@@ -1254,6 +1311,7 @@ export default function App() {
                 onSelectLiveTrackerMatch={(m) => setActiveTrackerMatchId(m.id)}
                 activeTrackerMatchId={activeTrackerMatch?.id}
                 oddsFormat={oddsFormat}
+                superOdd={superOdd}
               />
             </>
           )}

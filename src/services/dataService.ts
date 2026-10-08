@@ -1034,6 +1034,45 @@ export async function fetchLiveMatches(): Promise<Match[]> {
 }
 
 /**
+ * Campanha Super Odd Turbinada gravada pela sync (system_settings 'super_odd').
+ *
+ * `boosted_total` e o produto real das odds do banco — a sync ja turbinou a
+ * linha em market_choices, entao o boletim mostra exatamente o que a RPC vai
+ * pagar. Retorna null quando nao ha campanha ativa (banner escondido).
+ */
+export interface SuperOddConfig {
+  enabled: boolean;
+  match_ids: string[];
+  choice_ids: string[];
+  base_total: number;
+  boosted_total: number;
+}
+
+export async function fetchSuperOdd(): Promise<SuperOddConfig | null> {
+  try {
+    const { data, error } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'super_odd')
+      .maybeSingle();
+    if (error || !data?.value) return null;
+    const parsed = JSON.parse(data.value) as SuperOddConfig;
+    if (
+      !parsed?.enabled ||
+      !Array.isArray(parsed.match_ids) ||
+      !Array.isArray(parsed.choice_ids) ||
+      parsed.match_ids.length !== 2 ||
+      parsed.choice_ids.length !== 2
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * O overround vem como 1.05 no banco (multiplicador) e a UI fala em
  * "percentual de margem" (5). Converte para o formato do banco.
  */

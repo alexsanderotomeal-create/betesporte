@@ -71,13 +71,32 @@ export interface Match {
   markets: Market[];
 }
 
+/** Super Odd Turbinada: um perna de cada jogo (over do mercado de gols). */
+export interface SuperOddLeg {
+  match: Match;
+  market: Market;
+  choice: OddChoice;
+}
+
+/**
+ * Campanha resolvida contra o catalogo carregado. `base_total` e o produto das
+ * odds justas; `boosted_total` e o que o banco realmente paga (a sync grava a
+ * odd turbinada em market_choices, entao boletim, RPC e liquidacao usam o
+ * mesmo numero — aqui a tela so mostra as duas pontas da cotacao.
+ */
+export interface SuperOddPromo {
+  legs: [SuperOddLeg, SuperOddLeg];
+  title: string;
+  baseTotal: number;
+  boostedTotal: number;
+}
+
 export interface BetSelection {
   /**
    * 'election' = candidato (presidente/governador): nao tem partida, mercado de
    * 1x2 nem odd dinamica, e so pode ir como aposta simples. O default e 'match'
    * porque as linhas antigas do banco nao trazem o campo.
-   */
-  kind?: 'match' | 'election';
+   */  kind?: 'match' | 'election';
   /** Somente eleicao: ids do contesto e do candidato em election_*. */
   electionContestId?: string;
   electionCandidateId?: string;

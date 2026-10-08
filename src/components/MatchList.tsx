@@ -6,7 +6,7 @@ import {
   ChevronRight, 
   Layers
 } from 'lucide-react';
-import { Match, BetSelection, Market, OddChoice } from '../types/betting';
+import { Match, BetSelection, Market, OddChoice, SuperOddPromo } from '../types/betting';
 import { OddButton } from './OddButton';
 
 interface MatchListProps {
@@ -17,6 +17,8 @@ interface MatchListProps {
   onSelectLiveTrackerMatch: (match: Match) => void;
   activeTrackerMatchId?: string;
   oddsFormat: 'decimal' | 'fractional' | 'american';
+  /** Campanha ativa resolvida no App; sem ela o banner nao renderiza. */
+  superOdd?: SuperOddPromo | null;
 }
 
 export const MatchList: React.FC<MatchListProps> = ({
@@ -27,6 +29,7 @@ export const MatchList: React.FC<MatchListProps> = ({
   onSelectLiveTrackerMatch,
   activeTrackerMatchId,
   oddsFormat,
+  superOdd,
 }) => {
   const isChoiceSelected = (matchId: string, marketId: string, choiceId: string) => {
     return selectedSelections.some(
@@ -44,7 +47,8 @@ export const MatchList: React.FC<MatchListProps> = ({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Super Odds Highlight Banner */}
+      {/* Super Odds Highlight Banner — so com campanha ativa vind do banco */}
+      {superOdd && (
       <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-[#0d1e13] via-[#102419] to-[#0d1e13] border border-[#00e701]/30 p-3.5 sm:p-4 shadow-lg">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 relative z-10">
           <div className="flex items-center gap-3">
@@ -61,26 +65,27 @@ export const MatchList: React.FC<MatchListProps> = ({
                 </span>
               </div>
               <div className="text-sm sm:text-base font-extrabold text-white">
-                Flamengo & Real Madrid: Mais de 1.5 gols em ambos os jogos
+                {superOdd.title}
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
             <div className="text-right">
-              <span className="text-[10px] text-slate-400 line-through block">De 2.10</span>
-              <span className="text-base font-extrabold font-mono text-[#00e701]">Por 2.85</span>
+              <span className="text-[10px] text-slate-400 line-through block">
+                De {superOdd.baseTotal.toFixed(2)}
+              </span>
+              <span className="text-base font-extrabold font-mono text-[#00e701]">
+                Por {superOdd.boostedTotal.toFixed(2)}
+              </span>
             </div>
             <button
               onClick={() => {
-                const targetMatch = matches[0];
-                if (targetMatch) {
-                  const m1x2 = targetMatch.markets.find((m) => m.id === 'm-1x2');
-                  const choice = m1x2?.choices[0];
-                  if (m1x2 && choice) {
-                    onToggleSelection(targetMatch, m1x2, { ...choice, value: 2.85 });
-                  }
-                }
+                // Duas pernas reais (ids/odds do banco): o boletim monta a
+                // multiplicadora e a RPC paga exatamente o "Por" do banner.
+                superOdd.legs.forEach((leg) =>
+                  onToggleSelection(leg.match, leg.market, leg.choice)
+                );
               }}
               className="px-4 py-2 rounded-lg bg-[#00e701] hover:bg-[#00c901] text-black font-extrabold text-xs uppercase tracking-wider transition-colors shadow-md shadow-[#00e701]/30 cursor-pointer"
             >
@@ -89,6 +94,7 @@ export const MatchList: React.FC<MatchListProps> = ({
           </div>
         </div>
       </div>
+      )}
 
       {/* Matches Listing grouped by League */}
       {Object.keys(groupedMatches).length === 0 ? (
