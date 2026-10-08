@@ -84,7 +84,7 @@ import { UserDashboardModal } from './components/UserDashboardModal';
 import { AdminPanelPage } from './components/AdminPanelPage';
 import { ElectionOfficialModal } from './components/ElectionOfficialModal';
 import { ElectionShowcase } from './components/ElectionShowcase';
-import { ShieldCheck } from 'lucide-react';
+import { ShieldCheck, SlidersHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
 import { ElectionContest, ElectionCandidate, ELECTION_SCOPE_LABEL } from './types/election';
 
 export default function App() {
@@ -132,6 +132,7 @@ export default function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
   const [detailMatch, setDetailMatch] = useState<Match | null>(null);
   const [isMobileSlipOpen, setIsMobileSlipOpen] = useState<boolean>(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
 
   // Auth & Admin Modals
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
@@ -1253,18 +1254,44 @@ export default function App() {
 
       {/* Main Layout Container */}
       <main className="flex-1 max-w-[1720px] w-full mx-auto px-3 sm:px-6 py-4 flex flex-col lg:flex-row items-start gap-4">
-        {/* Left Sidebar: Sports Categories & Leagues */}
-        <SportsSidebar
-          selectedSport={selectedSport}
-          onSelectSport={setSelectedSport}
-          selectedLeague={selectedLeague}
-          onSelectLeague={setSelectedLeague}
-          liveMatchesCount={liveCount}
-          timeFilter={timeFilter}
-          onSelectTimeFilter={setTimeFilter}
-          matches={matches}
-          electionCount={electionContests.length}
-        />
+        {/* Left Sidebar: Sports Categories & Leagues (recolhivel no mobile) */}
+        <div className="w-full lg:w-64 shrink-0 flex flex-col">
+          <button
+            onClick={() => setIsSidebarOpen((v) => !v)}
+            aria-expanded={isSidebarOpen}
+            className="lg:hidden w-full flex items-center justify-between px-3.5 py-3 rounded-xl bg-[#12161f] border border-[#21262d] text-slate-200"
+          >
+            <span className="flex items-center gap-2 text-xs font-bold">
+              <SlidersHorizontal className="w-4 h-4 text-[#00e701]" />
+              Filtros &amp; Esportes
+            </span>
+            {isSidebarOpen ? (
+              <ChevronUp className="w-4 h-4 text-slate-400" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-slate-400" />
+            )}
+          </button>
+
+          <div className={`${isSidebarOpen ? 'flex' : 'hidden'} lg:flex flex-col mt-3 lg:mt-0`}>
+            <SportsSidebar
+              selectedSport={selectedSport}
+              onSelectSport={(sp) => {
+                setSelectedSport(sp);
+                setIsSidebarOpen(false);
+              }}
+              selectedLeague={selectedLeague}
+              onSelectLeague={(lg) => {
+                setSelectedLeague(lg);
+                setIsSidebarOpen(false);
+              }}
+              liveMatchesCount={liveCount}
+              timeFilter={timeFilter}
+              onSelectTimeFilter={setTimeFilter}
+              matches={matches}
+              electionCount={electionContests.length}
+            />
+          </div>
+        </div>
 
         {/* Center Main: Live Pitch Tracker + Match Cards */}
         <div className="flex-1 w-full min-w-0 flex flex-col">
@@ -1355,7 +1382,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-[#0d1117] border-t border-[#21262d] py-6 px-4 text-center text-xs text-slate-500 mt-auto">
+      <footer className="bg-[#0d1117] border-t border-[#21262d] pt-6 pb-28 lg:py-6 px-4 text-center text-xs text-slate-500 mt-auto">
         <div className="max-w-[1720px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-slate-400">
             <span className="font-extrabold text-white">PRIMAS<span className="text-[#00e701]">BET</span> PRO</span>

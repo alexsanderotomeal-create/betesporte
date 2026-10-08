@@ -158,7 +158,7 @@ export const SportsSidebar: React.FC<SportsSidebarProps> = ({
         <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-2 py-1 flex items-center gap-1.5 mb-1">
           <Trophy className="w-3 h-3 text-amber-400" /> Principais Ligas
         </div>
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-col gap-0.5 max-h-56 overflow-y-auto lg:max-h-none lg:overflow-visible">
           <button
             onClick={() => onSelectLeague('all')}
             className={`w-full flex items-center justify-between px-2.5 py-2 text-xs rounded-lg transition-colors text-left ${
@@ -207,7 +207,7 @@ export const SportsSidebar: React.FC<SportsSidebarProps> = ({
         <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-2 py-1 flex items-center gap-1.5 mb-1">
           <Flame className="w-3 h-3 text-[#00e701]" /> Esportes
         </div>
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-col gap-0.5 max-h-64 overflow-y-auto lg:max-h-none lg:overflow-visible">
           {sports.map((sp) => (
             <button
               key={sp.id}
@@ -233,8 +233,8 @@ export const SportsSidebar: React.FC<SportsSidebarProps> = ({
         </div>
       </div>
 
-      {/* Responsible Gaming Notice */}
-      <div className="bg-[#12161f] border border-[#21262d] rounded-xl p-3 text-[11px] text-slate-400 flex items-start gap-2">
+      {/* Responsible Gaming Notice (desktop; no mobile ja existe o selo 18+ no rodape) */}
+      <div className="hidden lg:flex bg-[#12161f] border border-[#21262d] rounded-xl p-3 text-[11px] text-slate-400 items-start gap-2">
         <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
         <div>
           <span className="text-slate-200 font-semibold block">Jogo Consciente</span>

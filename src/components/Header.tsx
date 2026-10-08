@@ -85,12 +85,12 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Brand Logo */}
         <div className="flex items-center gap-3">
           <a href="#" className="flex items-center gap-2 group">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#00e701] to-[#00a801] flex items-center justify-center shadow-md shadow-[#00e701]/20 group-hover:scale-105 transition-transform">
-              <Zap className="w-5 h-5 text-black font-extrabold fill-black" />
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-gradient-to-br from-[#00e701] to-[#00a801] flex items-center justify-center shadow-md shadow-[#00e701]/20 group-hover:scale-105 transition-transform">
+              <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-black font-extrabold fill-black" />
             </div>
             <div className="flex flex-col">
               <div className="flex items-center gap-1">
-                <span className="text-xl font-extrabold tracking-tight text-white font-sans">
+                <span className="text-lg sm:text-xl font-extrabold tracking-tight text-white font-sans">
                   PRIMAS<span className="text-[#00e701]">BET</span>
                 </span>
                 <span className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#00e701]/10 text-[#00e701] border border-[#00e701]/30 rounded">
@@ -127,7 +127,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* User Balance, Admin Panel, Database Sync & Auth */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3">
           {/* Atalho do mercado eleitoral. O rotulo antigo dizia "Dados TSE Oficiais" com
               title sobre "checagem anti-fake news" — nada disso existe. */}
           {onOpenElectionOfficial && (
@@ -153,10 +153,10 @@ export const Header: React.FC<HeaderProps> = ({
           {currentUser ? (
             <>
               {/* Wallet Balance Box */}
-              <div className="flex items-center bg-[#161b22] border border-[#30363d] rounded-lg px-2 sm:px-3 py-1.5 gap-2">
+              <div className="flex items-center bg-[#161b22] border border-[#30363d] rounded-lg px-2 sm:px-3 py-1.5 gap-1.5 sm:gap-2">
                 <div className="flex flex-col text-right">
                   <div className="flex items-center justify-end gap-1.5">
-                    <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">
+                    <span className="hidden sm:inline text-[10px] uppercase font-semibold text-slate-400 tracking-wider">
                       Saldo Real
                     </span>
                     <button
@@ -183,7 +183,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={onOpenDeposit}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-[#00e701] hover:bg-[#00c901] active:bg-[#00aa01] text-black font-bold text-xs uppercase tracking-wide transition-all shadow-sm shadow-[#00e701]/20 cursor-pointer"
+                    className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-md bg-[#00e701] hover:bg-[#00c901] active:bg-[#00aa01] text-black font-bold text-xs uppercase tracking-wide transition-all shadow-sm shadow-[#00e701]/20 cursor-pointer"
                   >
                     <ArrowDownLeft className="w-3.5 h-3.5 stroke-[2.5]" />
                     <span className="hidden sm:inline">Depositar</span>
@@ -367,6 +367,28 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Global Search Bar (mobile) */}
+      <div className="md:hidden bg-[#0d1117] border-t border-[#21262d] px-3 sm:px-6 py-2">
+        <div className="max-w-[1720px] mx-auto relative w-full">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Buscar times, ligas, eleições..."
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="w-full bg-[#161b22] border border-[#30363d] focus:border-[#00e701] rounded-lg pl-9 pr-8 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => onSearchChange('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+            >
+              ✕
+            </button>
+          )}
         </div>
       </div>
 
