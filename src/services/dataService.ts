@@ -137,15 +137,22 @@ function toMatch(row: RowMatch): Match {
     })
     .filter((market) => market.choices.length > 0);
 
-  const sport = row.league?.sport === 'basketball' ? 'basketball' : 'football';
+  const rawSport = row.league?.sport ?? 'football';
+  const sport = (
+    (['football', 'basketball', 'tennis', 'esports', 'volleyball', 'mma', 'politics'] as string[]).includes(rawSport)
+      ? rawSport
+      : 'football'
+  ) as SportId;
   const liveMinute = row.minute ?? 0;
   const period = !isLive
     ? 'Pré-Jogo'
     : sport === 'basketball'
       ? `Q${Math.min(4, Math.floor(liveMinute / 12) + 1)}`
-      : liveMinute <= 45
-        ? '1º Tempo'
-        : '2º Tempo';
+      : sport === 'football'
+        ? liveMinute <= 45
+          ? '1º Tempo'
+          : '2º Tempo'
+        : 'Ao Vivo';
 
   return {
     id: row.id,
@@ -1027,7 +1034,10 @@ export async function fetchLiveMatches(): Promise<Match[]> {
     )
     .in('status', ['OPEN', 'LIVE'])
     .order('kickoff_at', { ascending: true })
-    .limit(60);
+    // Feed ampliado (10 ligas de futebol + NBA + volei + tenis + MMA) com
+    // fixtures de 10 dias: hoje sao ~180 abertas e o antigo corte de 60
+    // deixava esportes inteiros fora do boletim e das contagens da sidebar.
+    .limit(300);
 
   if (error) throw new Error(describeSupabaseError(error));
   return ((data ?? []) as unknown as RowMatch[]).map(toMatch);

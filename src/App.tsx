@@ -1138,7 +1138,7 @@ export default function App() {
 
   // Filtered Matches
   const filteredMatches = useMemo(() => {
-    return matches.filter((m) => {
+    const filtered = matches.filter((m) => {
       // Search
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
@@ -1172,6 +1172,14 @@ export default function App() {
       }
 
       return true;
+    });
+
+    // Regra do produto: vôlei sempre por último no boletim, mesmo com horário
+    // mais cedo. O sort é estável — os demais mantêm a ordem de kickoff.
+    return filtered.sort((a, b) => {
+      const va = a.sport === 'volleyball' ? 1 : 0;
+      const vb = b.sport === 'volleyball' ? 1 : 0;
+      return va - vb;
     });
   }, [matches, searchQuery, selectedSport, selectedLeague, timeFilter, superOdd]);
 

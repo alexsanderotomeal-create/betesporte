@@ -27,7 +27,7 @@ const corsHeaders = {
 };
 
 interface FeedLeague {
-  sport: 'football' | 'basketball';
+  sport: 'football' | 'basketball' | 'tennis' | 'volleyball' | 'mma';
   slug: string;
   name: string;
   country: string;
@@ -38,7 +38,19 @@ const DEFAULT_LEAGUES: FeedLeague[] = [
   { sport: 'football', slug: 'eng.1', name: 'Premier League', country: 'Inglaterra' },
   { sport: 'football', slug: 'esp.1', name: 'La Liga', country: 'Espanha' },
   { sport: 'football', slug: 'ita.1', name: 'Serie A Italiana', country: 'Italia' },
+  { sport: 'football', slug: 'ger.1', name: 'Bundesliga', country: 'Alemanha' },
+  { sport: 'football', slug: 'fra.1', name: 'Ligue 1', country: 'Franca' },
+  { sport: 'football', slug: 'por.1', name: 'Liga Portugal', country: 'Portugal' },
+  { sport: 'football', slug: 'ned.1', name: 'Eredivisie', country: 'Holanda' },
+  { sport: 'football', slug: 'uefa.champions', name: 'Champions League', country: 'Europa' },
+  { sport: 'football', slug: 'uefa.europa', name: 'Europa League', country: 'Europa' },
   { sport: 'basketball', slug: 'nba', name: 'NBA', country: 'Estados Unidos' },
+  { sport: 'tennis', slug: 'atp', name: 'ATP', country: 'Mundo' },
+  { sport: 'tennis', slug: 'wta', name: 'WTA', country: 'Mundo' },
+  { sport: 'mma', slug: 'ufc', name: 'UFC', country: 'Mundo' },
+  { sport: 'mma', slug: 'bellator', name: 'Bellator', country: 'Mundo' },
+  { sport: 'volleyball', slug: 'womens-college-volleyball', name: 'Volei Feminino NCAA', country: 'EUA' },
+  { sport: 'volleyball', slug: 'mens-college-volleyball', name: 'Volei Masculino NCAA', country: 'EUA' },
 ];
 
 const MIN_SYNC_INTERVAL_MS = 45_000;
@@ -387,59 +399,161 @@ async function refreshSuperOdd(
 
 const ESPN_HOST = 'https://site.api.espn.com/apis/site/v2/sports';
 
+interface EspnTeam {
+  id: string;
+  displayName: string;
+  shortDisplayName?: string;
+  logo?: string;
+  logos?: { href: string }[];
+}
+
+interface EspnCompetitor {
+  homeAway?: 'home' | 'away';
+  score?: string;
+  winner?: boolean | null;
+  team?: EspnTeam;
+  // Tenis/MMA: a ESPN entrega atleta no lugar de clube (sem team).
+  athlete?: {
+    id?: string;
+    guid?: string;
+    displayName: string;
+    shortName?: string;
+    flag?: { href?: string };
+  };
+  linescores?: { value?: number; winner?: boolean }[];
+}
+
+interface EspnCompetition {
+  competitors?: EspnCompetitor[];
+  status?: {
+    type: { state?: string; detail?: string };
+    displayClock?: string;
+    period?: number;
+  };
+}
+
 interface EspnEvent {
   id: string;
   date: string;
   name?: string;
-  competitions: {
-    competitors: {
-      homeAway: 'home' | 'away';
-      score: string;
-      winner?: boolean | null;
-      team: {
-        id: string;
-        displayName: string;
-        shortDisplayName?: string;
-        logo?: string;
-        logos?: { href: string }[];
-      };
-    }[];
-    status: {
-      type: { state: string; detail?: string };
-      displayClock?: string;
-      period?: number;
-    };
-  }[];
+  competitions?: EspnCompetition[];
+  // Tenis agrupa a partida em groupings[].competitions[] (nunca no evento).
+  groupings?: Array<{ competitions?: EspnCompetition[] }>;
+}
+
+/**
+ * Partida do evento: futebol/basquete/volei colocam competitions direto no
+ * evento; tenis usa groupings[].competitions[]. A funcao resolve os dois.
+ */
+function competitionOf(event: EspnEvent): EspnCompetition | undefined {
+  if (event.competitions?.length) return event.competitions[0];
+  for (const grouping of event.groupings ?? []) {
+    if (grouping.competitions?.length) return grouping.competitions[0];
+  }
+  return undefined;
+}
+
+/**
+ * Casa/fora: a ESPN omite homeAway em alguns esportes (MMA) — ai a ordem dos
+ * competidores decide (o primeiro e a casa).
+ */
+function sides(competition: EspnCompetition): { home?: EspnCompetitor; away?: EspnCompetitor } {
+  const list = competition.competitors ?? [];
+  let home = list.find((c) => c.homeAway === 'home');
+  let away = list.find((c) => c.homeAway === 'away');
+  if ((!home || !away) && list.length >= 2) {
+    home = list[0];
+    away = list[1];
+  }
+  return { home, away };
+}
+
+/**
+ * Placeholder da ESPN: torneio sem chaveamento (tenis "TBD x TBD") ou jogo
+ * de mata-mata com chave ainda nao sorteada. Nao e partida — descarta.
+ */
+const PLACEHOLDER_TEAM = /^(TBD|TBA|To Be Determined)$/i;
+
+/**
+ * Time do competidor: tenis entrega atleta (nome + bandeira) no lugar do clube —
+ * sintetiza um "time" para o catalogo, com chave prefixada para nao colidir com
+ * ids de clubes de outros esportes.
+ */
+function teamOf(competitor: EspnCompetitor): EspnTeam | undefined {
+  if (competitor.team) return competitor.team;
+  const athlete = competitor.athlete;
+  if (!athlete?.displayName || PLACEHOLDER_TEAM.test(athlete.displayName.trim())) {
+    return undefined;
+  }
+  return {
+    id: `athlete-${athlete.guid ?? athlete.id ?? athlete.displayName}`,
+    displayName: athlete.displayName,
+    shortDisplayName: athlete.shortName,
+    logos: athlete.flag?.href ? [{ href: athlete.flag.href }] : undefined,
+  };
+}
+
+/**
+ * Placar do competidor: pontuacao direta quando existe; em tenis o `score`
+ * vem vazio e o placar da partida sao sets vencidos (linescores com winner).
+ */
+function scoreOf(competitor?: EspnCompetitor): number {
+  if (!competitor) return 0;
+  const direct = Number(competitor.score);
+  if (competitor.score != null && competitor.score !== '' && Number.isFinite(direct)) {
+    return direct;
+  }
+  if (competitor.linescores?.length) {
+    return competitor.linescores.filter((l) => l.winner).length;
+  }
+  return 0;
+}
+
+/**
+ * Inicio de ontem em UTC: janela minima do feed (fetch busca ontem+hoje).
+ * A ESPN ignora `dates` em alguns esportes (tenis devolve partidas antigas ja
+ * finalizadas) — fora da janela o evento e descartado antes de persistir.
+ */
+function startOfYesterdayMs(): number {
+  const d = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
 async function fetchScoreboard(sport: string, slug: string): Promise<EspnEvent[]> {
   const espnSport = sport === 'football' ? 'soccer' : sport;
-  // Ontem + hoje: o scoreboard do dia so mostra a partida enquanto ela existe
-  // naquele dia — sem repetir ontem, um jogo encerrado nunca recebe o
-  // resultado e fica preso para sempre em OPEN 0-0.
+  // A ESPN so aceita `dates=YYYYMMDD` (dia) ou `YYYYMM` (mes) — range nao
+  // existe. O mes inteiro em um request cobre ontem (liquidacao de jogos
+  // encerrados), hoje e o horizonte de fixtures dos proximos 10 dias, com a
+  // metade dos requests da versao dia-a-dia. A janela de persistencia (ver
+  // persistEvent) e quem corta o restante do mes.
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
-  const dates = [now - dayMs, now].map((t) =>
-    new Date(t).toISOString().slice(0, 10).replace(/-/g, '')
-  );
+  const months = [
+    ...new Set(
+      [now - dayMs, now, now + 10 * dayMs].map((t) =>
+        new Date(t).toISOString().slice(0, 7).replace('-', '')
+      )
+    ),
+  ];
 
   const merged: EspnEvent[] = [];
   const seen = new Set<string>();
-  for (const date of dates) {
-    const events = await fetchScoreboardDay(espnSport, slug, date);
+  for (const month of months) {
+    const events = await fetchScoreboardDay(espnSport, slug, month);
     for (const event of events) {
       if (seen.has(event.id)) continue;
       seen.add(event.id);
       merged.push(event);
     }
-    // Evita rajada para o CDN da ESPN entre dias.
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    // Evita rajada para o CDN da ESPN entre meses.
+    if (months.length > 1) await new Promise((resolve) => setTimeout(resolve, 350));
   }
   return merged;
 }
 
-async function fetchScoreboardDay(espnSport: string, slug: string, date: string): Promise<EspnEvent[]> {
-  const url = `${ESPN_HOST}/${espnSport}/${encodeURIComponent(slug)}/scoreboard?dates=${date}`;
+async function fetchScoreboardDay(espnSport: string, slug: string, dates: string): Promise<EspnEvent[]> {
+  // limit=250: sem ele a ESPN corta em 100 eventos (cabe em um mes de NBA).
+  const url = `${ESPN_HOST}/${espnSport}/${encodeURIComponent(slug)}/scoreboard?dates=${dates}&limit=250`;
 
   // ESPN devolve 403 para o User-Agent padrao do Deno; um User-Agent de
   // navegador passa. Sem chave, sem cookie — so o feed publico.
@@ -610,7 +724,7 @@ async function syncLeague(
 
 async function syncTeam(
   admin: ReturnType<typeof createClient>,
-  team: EspnEvent['competitions'][number]['competitors'][number]['team'],
+  team: EspnTeam,
   teamMap: Map<string, Record<string, unknown>>
 ): Promise<TeamRef> {
   const externalKey = String(team.id);
@@ -659,12 +773,13 @@ async function syncMatch(
   margin: number,
   existingMatches: Map<string, Record<string, unknown>>
 ): Promise<string> {
-  const competition = event.competitions?.[0];
+  const competition = competitionOf(event);
   const state = competition?.status?.type?.state ?? 'pre';
   const status = state === 'in' ? 'LIVE' : state === 'post' ? 'FINISHED' : 'OPEN';
-  const minute = state === 'pre' ? 0 : computeMinute(sport, competition!);
-  const homeScore = Number(competition?.competitors.find((c) => c.homeAway === 'home')?.score) || 0;
-  const awayScore = Number(competition?.competitors.find((c) => c.homeAway === 'away')?.score) || 0;
+  const minute = state === 'pre' ? 0 : computeMinute(sport, competition);
+  const { home, away } = competition ? sides(competition) : {};
+  const homeScore = scoreOf(home);
+  const awayScore = scoreOf(away);
   const kickoffMs = Date.parse(event.date);
   const kickoffAt = new Date(kickoffMs).toISOString();
 
@@ -722,26 +837,52 @@ async function persistEvent(
   catalog: Catalog,
   existingMatches: Map<string, Record<string, unknown>>
 ): Promise<'synced' | 'skipped'> {
-  const competition = event.competitions?.[0];
+  const competition = competitionOf(event);
   if (!competition) return 'skipped';
 
-  const home = competition.competitors.find((c) => c.homeAway === 'home');
-  const away = competition.competitors.find((c) => c.homeAway === 'away');
+  const { home, away } = sides(competition);
   if (!home || !away) return 'skipped';
+
+  const homeTeam = teamOf(home);
+  const awayTeam = teamOf(away);
+  if (!homeTeam || !awayTeam) return 'skipped';
+  // Mata-mata com chave nao sorteada chega como clube "TBD" (duas chaves
+  // distintas nao colidem na constraint, mas virariam "TBD x TBD" no boletim).
+  if (
+    PLACEHOLDER_TEAM.test(homeTeam.displayName.trim()) ||
+    PLACEHOLDER_TEAM.test(awayTeam.displayName.trim())
+  ) {
+    return 'skipped';
+  }
 
   const state = competition.status?.type?.state ?? 'pre';
   if (!['pre', 'in', 'post'].includes(state)) return 'skipped';
 
+  // Janela de persistencia: de ontem (liquidacao de encerrados) ate 10 dias
+  // a frente (fixtures — a Europa League comeca no dia 16 e um horizonte de
+  // 7d curto demais a deixava de fora ate o dia 15). A busca e por mes, mas
+  // o mes cheio nao entra: a ESPN ignora `dates` em alguns esportes (tenis
+  // devolve partidas antigas ja finalizadas) e jogo velho nunca sai de OPEN
+  // no front — descarta aqui.
+  const kickoffMs = Date.parse(event.date);
+  if (
+    !Number.isFinite(kickoffMs) ||
+    kickoffMs < startOfYesterdayMs() ||
+    kickoffMs > Date.now() + 10 * 24 * 3_600_000
+  ) {
+    return 'skipped';
+  }
+
   const leagueId = await syncLeague(admin, league, catalog.leagues);
-  const homeTeam = await syncTeam(admin, home.team, catalog.teams);
-  const awayTeam = await syncTeam(admin, away.team, catalog.teams);
+  const homeTeamRef = await syncTeam(admin, homeTeam, catalog.teams);
+  const awayTeamRef = await syncTeam(admin, awayTeam, catalog.teams);
 
   const matchId = await syncMatch(
     admin,
     league.sport,
     leagueId,
-    homeTeam.id,
-    awayTeam.id,
+    homeTeamRef.id,
+    awayTeamRef.id,
     event,
     margin,
     existingMatches
@@ -757,9 +898,9 @@ async function persistEvent(
       league.sport,
       margin,
       {
-        homeName: home.team.shortDisplayName || home.team.displayName,
-        awayName: away.team.shortDisplayName || away.team.displayName,
-        odds: computeOdds(league.sport, state, computeMinute(league.sport, competition), Number(home.score) || 0, Number(away.score) || 0),
+        homeName: homeTeam.shortDisplayName || homeTeam.displayName,
+        awayName: awayTeam.shortDisplayName || awayTeam.displayName,
+        odds: computeOdds(league.sport, state, computeMinute(league.sport, competition), scoreOf(home), scoreOf(away)),
       },
       existingMatches.get(event.id)
     );
@@ -809,6 +950,13 @@ function computeOdds(
       over: pOver,
       line,
     };
+  }
+
+  // Duelo (tenis, MMA, volei): dois lados, sem empate e sem total. O placar
+  // de sets/jogos desloca a probabilidade; pre-jogo e 50/50.
+  if (sport !== 'football') {
+    const pHome = clamp(0.5 + (live ? diff * 0.12 : 0), 0.05, 0.95);
+    return { home: pHome, draw: null, away: 1 - pHome, over: 0.5, line: 0 };
   }
 
   // Futebol: 1X2 com deslocamento logistico da colocacao ao longo do jogo.
@@ -877,6 +1025,19 @@ function buildMarkets(
         choices: withSort([
           [`Mais de ${odds.line.toFixed(0)}`, fairToOdd(odds.over, m)],
           [`Menos de ${odds.line.toFixed(0)}`, fairToOdd(1 - odds.over, m)],
+        ]),
+      },
+    ];
+  }
+
+  if (sport !== 'football') {
+    return [
+      {
+        name: 'Vencedor da Partida',
+        category: 'main',
+        choices: withSort([
+          [market.homeName, fairToOdd(odds.home, m)],
+          [market.awayName, fairToOdd(odds.away, m)],
         ]),
       },
     ];
@@ -1025,13 +1186,13 @@ function fairToOdd(fairProbability: number, margin: number): number {
 
 function computeMinute(
   sport: string,
-  competition: EspnEvent['competitions'][number]
+  competition?: EspnCompetition
 ): number {
-  const state = competition.status?.type?.state;
+  const state = competition?.status?.type?.state;
   if (state === 'post') return sport === 'basketball' ? 48 : 90;
 
-  const clock = competition.status?.displayClock ?? '';
-  const period = competition.status?.period ?? 1;
+  const clock = competition?.status?.displayClock ?? '';
+  const period = competition?.status?.period ?? 1;
 
   if (sport === 'basketball') {
     const raw = clock.split(':')[0];

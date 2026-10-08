@@ -60,8 +60,8 @@ export const SportsSidebar: React.FC<SportsSidebarProps> = ({
     { id: 'basketball', name: 'Basquete', icon: '🏀' },
     { id: 'tennis', name: 'Tênis', icon: '🎾' },
     { id: 'esports', name: 'E-Sports', icon: '🎮' },
-    { id: 'volleyball', name: 'Vôlei', icon: '🏐' },
     { id: 'mma', name: 'MMA / UFC', icon: '🥊' },
+    { id: 'volleyball', name: 'Vôlei', icon: '🏐' },
   ].map((sp) => ({ ...sp, count: sportCounts[sp.id] ?? 0 }));
 
   // Ligas montadas a partir dos dados: o clique sempre bate com o nome
@@ -77,7 +77,13 @@ export const SportsSidebar: React.FC<SportsSidebarProps> = ({
       if (entry) entry.count += 1;
       else byLeague.set(key, { name: m.league, country: m.country, sport: m.sport, count: 1 });
     });
-    const fromData = [...byLeague.values()].sort((a, b) => b.count - a.count);
+    const sorted = [...byLeague.values()].sort((a, b) => b.count - a.count);
+    // Regra do produto: ligas de vôlei sempre no fim da lista, mesmo com
+    // mais jogos que as de futebol (o resto segue o nº de partidas).
+    const fromData = [
+      ...sorted.filter((l) => l.sport !== 'volleyball'),
+      ...sorted.filter((l) => l.sport === 'volleyball'),
+    ];
     return [
       { name: 'Eleições Presidenciais', country: 'Brasil', sport: 'politics', count: electionCount },
       ...fromData,

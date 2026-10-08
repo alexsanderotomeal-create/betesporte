@@ -450,6 +450,17 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
+              onClick={() => onSelectSport('mma')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                activeSportFilter === 'mma' 
+                  ? 'bg-[#00e701] text-black shadow-sm' 
+                  : 'text-slate-300 hover:text-white hover:bg-[#1a202c]'
+              }`}
+            >
+              🥊 MMA
+            </button>
+
+            <button
               onClick={() => onSelectSport('esports')}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
                 activeSportFilter === 'esports' 
@@ -458,6 +469,17 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               🎮 E-Sports
+            </button>
+
+            <button
+              onClick={() => onSelectSport('volleyball')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                activeSportFilter === 'volleyball' 
+                  ? 'bg-[#00e701] text-black shadow-sm' 
+                  : 'text-slate-300 hover:text-white hover:bg-[#1a202c]'
+              }`}
+            >
+              🏐 Vôlei
             </button>
           </nav>
 
