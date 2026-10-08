@@ -161,15 +161,32 @@ function toMatch(row: RowMatch): Match {
     minute: liveMinute,
     period,
     status: isLive ? 'LIVE' : row.status === 'FINISHED' ? 'FINISHED' : 'SCHEDULED',
-    startTime: new Date(row.kickoff_at).toLocaleTimeString('pt-BR', {
-      hour: '2-digit',
-      minute: '2-digit',
-    }),
+    startTime: formatKickoff(row.kickoff_at),
     isHot: isLive,
     stats: EMPTY_STATS,
     events: [],
     markets,
   };
+}
+
+/**
+ * "Hoje, 19:30" / "Amanhã, 16:00" / "08/10, 16:00" no fuso do usuario — o
+ * mesmo formato dos mocks. O card divide por ',' para exibir data e hora em
+ * linhas separadas e os filtros "Hoje"/"Amanhã" procuram esses prefixos; com
+ * o horario puro, os dois recursos ficavam quebrados para o banco real.
+ */
+function formatKickoff(iso: string): string {
+  const kickoff = new Date(iso);
+  const time = kickoff.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  const now = new Date();
+  const dayOf = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((dayOf(kickoff) - dayOf(now)) / 86_400_000);
+
+  if (diffDays === 0) return `Hoje, ${time}`;
+  if (diffDays === 1) return `Amanhã, ${time}`;
+  if (diffDays === -1) return `Ontem, ${time}`;
+  return `${kickoff.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}, ${time}`;
 }
 
 /**

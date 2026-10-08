@@ -257,11 +257,33 @@ interface EspnEvent {
 }
 
 async function fetchScoreboard(sport: string, slug: string): Promise<EspnEvent[]> {
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  // O config guarda o esporte interno ('football'), mas o path da ESPN para
-  // futebol e 'soccer' — 'football/bra.1' responde 400. Basketball ja bate.
   const espnSport = sport === 'football' ? 'soccer' : sport;
-  const url = `${ESPN_HOST}/${espnSport}/${encodeURIComponent(slug)}/scoreboard?dates=${today}`;
+  // Ontem + hoje: o scoreboard do dia so mostra a partida enquanto ela existe
+  // naquele dia — sem repetir ontem, um jogo encerrado nunca recebe o
+  // resultado e fica preso para sempre em OPEN 0-0.
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const dates = [now - dayMs, now].map((t) =>
+    new Date(t).toISOString().slice(0, 10).replace(/-/g, '')
+  );
+
+  const merged: EspnEvent[] = [];
+  const seen = new Set<string>();
+  for (const date of dates) {
+    const events = await fetchScoreboardDay(espnSport, slug, date);
+    for (const event of events) {
+      if (seen.has(event.id)) continue;
+      seen.add(event.id);
+      merged.push(event);
+    }
+    // Evita rajada para o CDN da ESPN entre dias.
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  }
+  return merged;
+}
+
+async function fetchScoreboardDay(espnSport: string, slug: string, date: string): Promise<EspnEvent[]> {
+  const url = `${ESPN_HOST}/${espnSport}/${encodeURIComponent(slug)}/scoreboard?dates=${date}`;
 
   // ESPN devolve 403 para o User-Agent padrao do Deno; um User-Agent de
   // navegador passa. Sem chave, sem cookie — so o feed publico.
@@ -569,19 +591,25 @@ async function persistEvent(
     existingMatches
   );
 
-  // Mercados atualizados por diff: so grava quando a odd/label mudou.
-  await syncMarkets(
-    admin,
-    matchId,
-    league.sport,
-    margin,
-    {
-      homeName: home.team.shortDisplayName || home.team.displayName,
-      awayName: away.team.shortDisplayName || away.team.displayName,
-      odds: computeOdds(league.sport, state, computeMinute(league.sport, competition), Number(home.score) || 0, Number(away.score) || 0),
-    },
-    existingMatches.get(event.id)
-  );
+  // Mercados por diff. Falha aqui NAO pode abortar a partida nem os demais
+  // eventos da liga: a partida ja esta com placar/status corretos e a
+  // proxima passada tenta o preco de novo. O erro vai para o log.
+  try {
+    await syncMarkets(
+      admin,
+      matchId,
+      league.sport,
+      margin,
+      {
+        homeName: home.team.shortDisplayName || home.team.displayName,
+        awayName: away.team.shortDisplayName || away.team.displayName,
+        odds: computeOdds(league.sport, state, computeMinute(league.sport, competition), Number(home.score) || 0, Number(away.score) || 0),
+      },
+      existingMatches.get(event.id)
+    );
+  } catch (err) {
+    console.error(`syncMarkets falhou em ${matchId} (${league.slug}):`, err);
+  }
 
   return 'synced';
 }
@@ -832,7 +860,11 @@ async function syncChoices(
 /** Garante que a soma das inversas = margem da casa (overround). */
 function fairToOdd(fairProbability: number, margin: number): number {
   const p = clamp(fairProbability, 0.02, 0.98);
-  return round2((1 / p) / margin);
+  // Piso 1.01: market_choices exige odds > 1 com 2 casas. Em mercados
+  // quase certos a razao justa com margem cai para 1.00 ou menos (ex.:
+  // 'Mais de 2.5' num jogo ja com 3 gols) e o CHECK derrubava o upsert —
+  // que, por ser por partida, travava o sync inteiro da liga.
+  return Math.max(1.01, round2((1 / p) / margin));
 }
 
 function computeMinute(
