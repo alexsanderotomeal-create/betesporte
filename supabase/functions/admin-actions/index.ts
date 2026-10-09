@@ -308,6 +308,21 @@ Deno.serve(async (req: Request) => {
       if (typeof settings.bankAccount === 'string' && settings.bankAccount.trim()) {
         patch.bank_account = settings.bankAccount.trim();
       }
+      if (typeof settings.usdtEnabled === 'boolean') {
+        patch.usdt_enabled = String(settings.usdtEnabled);
+      }
+      if (typeof settings.usdtWalletAddress === 'string' && settings.usdtWalletAddress.trim()) {
+        patch.usdt_wallet_address = settings.usdtWalletAddress.trim();
+      }
+      if (typeof settings.usdtRate === 'number' && settings.usdtRate > 0) {
+        patch.usdt_rate = String(settings.usdtRate);
+      }
+      if (typeof settings.autoApproveSmallDeposits === 'boolean') {
+        patch.auto_approve_small = String(settings.autoApproveSmallDeposits);
+      }
+      if (typeof settings.autoApproveThreshold === 'number' && settings.autoApproveThreshold > 0) {
+        patch.auto_approve_threshold = String(Math.round(settings.autoApproveThreshold));
+      }
 
       // system_settings e key/value e nao tem unique em key confirmado. Por isso
       // update-then-insert em vez de upsert, que abortaria em coluna sem indice.

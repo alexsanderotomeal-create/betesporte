@@ -251,6 +251,7 @@ export interface RowDeposit {
   method: string;
   transaction_hash: string | null;
   proof_url: string | null;
+  wallet_address: string | null;
   created_at: string;
 }
 
@@ -474,6 +475,7 @@ function rowToDeposit(row: RowDeposit): DepositRequest {
     paymentMethod: (row.method || 'pix').toUpperCase(),
     date: formatDate(row.created_at),
     status: row.status === 'confirmed' ? 'approved' : row.status === 'pending' ? 'pending' : 'rejected',
+    walletAddress: row.wallet_address ?? undefined,
   };
 }
 
@@ -515,12 +517,15 @@ export async function fetchAllDeposits(): Promise<DepositRequest[]> {
  */
 export async function createDepositRequest(
   amount: number,
-  pixTxid?: string
+  method: 'pix' | 'usdt' = 'pix',
+  txid?: string,
+  walletAddress?: string
 ): Promise<DepositRequest> {
   const { data, error } = await supabase.rpc('request_deposit', {
     p_amount: amount,
-    p_method: 'pix',
-    p_txid: pixTxid ?? null,
+    p_method: method,
+    p_txid: txid ?? null,
+    p_wallet_address: walletAddress ?? null,
   });
 
   if (error) throw new Error(describeSupabaseError(error));
@@ -639,6 +644,9 @@ export const DEFAULT_HOUSE_SETTINGS: HouseSettings = {
   bankName: '',
   bankAgency: '',
   bankAccount: '',
+  usdtEnabled: false,
+  usdtWalletAddress: '',
+  usdtRate: 5.2,
 };
 
 /**
@@ -666,6 +674,11 @@ export async function fetchHouseSettings(): Promise<HouseSettings> {
       'bank_name',
       'bank_agency',
       'bank_account',
+      'usdt_enabled',
+      'usdt_wallet_address',
+      'usdt_rate',
+      'auto_approve_small',
+      'auto_approve_threshold',
     ]);
 
   if (error) throw new Error(describeSupabaseError(error));
@@ -690,8 +703,11 @@ export async function fetchHouseSettings(): Promise<HouseSettings> {
       settings.get('welcome_bonus_percent'),
       DEFAULT_HOUSE_SETTINGS.welcomeBonusPercent
     ),
-    autoApproveSmallDeposits: false,
-    autoApproveThreshold: 100,
+    autoApproveSmallDeposits: readBool('auto_approve_small', false),
+    autoApproveThreshold: toNumber(
+      settings.get('auto_approve_threshold'),
+      DEFAULT_HOUSE_SETTINGS.autoApproveThreshold
+    ),
     // O banco guarda a margem como overround (1.05); a UI fala em percentual (5).
     houseMarginPercent: overround * 100 - 100,
     maintenanceMode: readBool('maintenance_mode', false),
@@ -703,6 +719,12 @@ export async function fetchHouseSettings(): Promise<HouseSettings> {
     bankName: settings.get('bank_name') || DEFAULT_HOUSE_SETTINGS.bankName,
     bankAgency: settings.get('bank_agency') || DEFAULT_HOUSE_SETTINGS.bankAgency,
     bankAccount: settings.get('bank_account') || DEFAULT_HOUSE_SETTINGS.bankAccount,
+    usdtEnabled: readBool('usdt_enabled', false),
+    usdtWalletAddress:
+      settings.get('usdt_wallet_address') || DEFAULT_HOUSE_SETTINGS.usdtWalletAddress,
+    usdtRate: settings.get('usdt_rate')
+      ? parseFloat(settings.get('usdt_rate') as string)
+      : DEFAULT_HOUSE_SETTINGS.usdtRate,
   };
 }
 

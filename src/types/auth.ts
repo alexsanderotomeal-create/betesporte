@@ -38,6 +38,8 @@ export interface DepositRequest {
   date: string;
   status: RequestStatus;
   notes?: string;
+  /** Endereco da carteira de origem informado pelo cliente (depositos USDT). */
+  walletAddress?: string;
 }
 
 export interface WithdrawRequest {
@@ -74,4 +76,10 @@ export interface HouseSettings {
   bankName: string;
   bankAgency: string;
   bankAccount: string;
+  /** Se o deposito por carteira USDT (TRC-20) esta habilitado para o cliente. */
+  usdtEnabled: boolean;
+  /** Endereco da carteira TRC-20 da casa onde o cliente envia o USDT. */
+  usdtWalletAddress: string;
+  /** Cotacao interna: reais necessarios por 1 USDT (ex.: 5.20 = R$5,20 por USDT). */
+  usdtRate: number;
 }

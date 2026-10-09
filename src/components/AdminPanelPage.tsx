@@ -21,7 +21,8 @@ import {
   Home,
   Trash2,
   Plus,
-  Save
+  Save,
+  Coins
 } from 'lucide-react';
 import { UserAccount, DepositRequest, WithdrawRequest, HouseSettings } from '../types/auth';
 import { BetTicket } from '../types/betting';
@@ -654,6 +655,12 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
                               <span>Data: {dep.date}</span>
                               <span>·</span>
                               <span>Método: {dep.paymentMethod}</span>
+                              {dep.walletAddress && (
+                                <>
+                                  <span>·</span>
+                                  <span className="truncate max-w-[160px]">Origem: {dep.walletAddress}</span>
+                                </>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -1171,22 +1178,43 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
                 </span>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer">
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settingsForm.autoApproveSmallDeposits}
+                    onChange={(e) =>
+                      setSettingsForm({
+                        ...settingsForm,
+                        autoApproveSmallDeposits: e.target.checked,
+                      })
+                    }
+                    className="rounded text-[#00e701] focus:ring-0"
+                  />
+                  <span className="text-slate-300 font-medium">
+                    Aprovação Automática SPI para depósitos menores que R${' '}
+                    {settingsForm.autoApproveThreshold}
+                  </span>
+                </label>
+
                 <input
-                  type="checkbox"
-                  checked={settingsForm.autoApproveSmallDeposits}
+                  type="number"
+                  min="1"
+                  step="10"
+                  value={settingsForm.autoApproveThreshold}
                   onChange={(e) =>
                     setSettingsForm({
                       ...settingsForm,
-                      autoApproveSmallDeposits: e.target.checked,
+                      autoApproveThreshold: parseFloat(e.target.value) || 100,
                     })
                   }
-                  className="rounded text-[#00e701] focus:ring-0"
+                  disabled={!settingsForm.autoApproveSmallDeposits}
+                  className={`w-24 bg-[#161b22] border border-[#30363d] focus:border-[#00e701] rounded-xl px-3 py-1.5 text-white font-mono focus:outline-none ${
+                    settingsForm.autoApproveSmallDeposits ? '' : 'opacity-50 cursor-not-allowed'
+                  }`}
+                  title="Limite para aprovação automática (R$)"
                 />
-                <span className="text-slate-300 font-medium">
-                  Aprovação Automática SPI para depósitos menores que R$ 100,00
-                </span>
-              </label>
+              </div>
             </div>
 
             {/* Conta bancaria / PIX de deposito dos clientes */}
@@ -1299,6 +1327,71 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
                     onChange={(e) => setSettingsForm({ ...settingsForm, bankAccount: e.target.value })}
                     placeholder="000000-0"
                     className="w-full bg-[#161b22] border border-[#30363d] focus:border-[#00e701] rounded-xl px-3 py-2 text-white font-mono focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Depósito USDT (carteira TRC-20) */}
+            <div className="pt-3 border-t border-[#21262d] flex flex-col gap-3">
+              <div className="flex items-center gap-1.5">
+                <Coins className="w-4 h-4 text-[#26a17b]" />
+                <span className="font-bold text-white text-sm">
+                  Depósito por Carteira USDT (TRC-20)
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-400 leading-relaxed">
+                O cliente envia USDT para o endereço abaixo (rede TRC-20), cola o TXID e o
+                pedido entra na fila manual de depósitos. A cotação converte o valor em R$ para
+                USDT na tela do cliente.
+              </span>
+
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsForm.usdtEnabled}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, usdtEnabled: e.target.checked })}
+                  className="rounded text-[#26a17b] focus:ring-[#26a17b]"
+                />
+                <span className="text-sm text-slate-200 font-semibold">
+                  Habilitar depósitos USDT para os clientes
+                </span>
+              </label>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="text-slate-300 font-semibold block mb-1">
+                    Endereço TRC-20 da casa:
+                  </label>
+                  <input
+                    type="text"
+                    value={settingsForm.usdtWalletAddress}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, usdtWalletAddress: e.target.value })}
+                    placeholder="T..."
+                    disabled={!settingsForm.usdtEnabled}
+                    className={`w-full bg-[#161b22] border border-[#30363d] focus:border-[#26a17b] rounded-xl px-3 py-2 text-white font-mono focus:outline-none ${
+                      settingsForm.usdtEnabled ? '' : 'opacity-50 cursor-not-allowed'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">
+                    Cotação USDT (R$ por 1 USDT):
+                  </label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={settingsForm.usdtRate}
+                    onChange={(e) =>
+                      setSettingsForm({ ...settingsForm, usdtRate: parseFloat(e.target.value) || 0 })
+                    }
+                    disabled={!settingsForm.usdtEnabled}
+                    placeholder="5.20"
+                    className={`w-full bg-[#161b22] border border-[#30363d] focus:border-[#26a17b] rounded-xl px-3 py-2 text-white font-mono focus:outline-none ${
+                      settingsForm.usdtEnabled ? '' : 'opacity-50 cursor-not-allowed'
+                    }`}
                   />
                 </div>
               </div>

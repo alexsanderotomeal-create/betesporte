@@ -1039,7 +1039,13 @@ export default function App() {
   // com o pedido que nunca chegou ao banco.
   const handleQueueDepositRequest = async (req: DepositRequest) => {
     try {
-      const created = await createDepositRequest(req.amount, req.txid);
+      const method = req.paymentMethod?.toLowerCase() === 'usdt' ? 'usdt' : 'pix';
+      const created = await createDepositRequest(
+        req.amount,
+        method,
+        req.txid,
+        req.walletAddress
+      );
       setDepositRequests(prev => [created, ...prev]);
     } catch (err) {
       throw new Error(err instanceof Error ? err.message : 'Não foi possível registrar o depósito.');
@@ -1422,6 +1428,9 @@ export default function App() {
         minDeposit={houseSettings.minDeposit}
         welcomeBonusEnabled={houseSettings.welcomeBonusEnabled}
         welcomeBonusPercent={houseSettings.welcomeBonusPercent}
+        usdtEnabled={houseSettings.usdtEnabled}
+        usdtWalletAddress={houseSettings.usdtWalletAddress}
+        usdtRate={houseSettings.usdtRate}
         onDepositSuccess={handleDepositSuccess}
         onRequestDepositApproval={handleQueueDepositRequest}
       />
