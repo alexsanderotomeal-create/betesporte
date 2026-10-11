@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   X, 
   ArrowUpRight, 
   CheckCircle2, 
   AlertCircle, 
   ShieldCheck, 
-  Lock
+  Lock,
+  Landmark
 } from 'lucide-react';
 import { UserWallet, Transaction } from '../types/betting';
-import { UserAccount, WithdrawRequest } from '../types/auth';
+import { UserAccount, WithdrawRequest, UserBankAccount } from '../types/auth';
+import { fetchBankAccounts } from '../services/dataService';
 
 interface WithdrawModalProps {
   isOpen: boolean;
@@ -37,6 +39,41 @@ export const WithdrawModal: React.FC<WithdrawModalProps> = ({
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [successReceipt, setSuccessReceipt] = useState<Transaction | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [savedAccounts, setSavedAccounts] = useState<UserBankAccount[]>([]);
+
+  useEffect(() => {
+    if (!isOpen || !currentUser?.id) return;
+    let cancelled = false;
+    fetchBankAccounts(currentUser.id)
+      .then((accounts) => {
+        if (cancelled) return;
+        setSavedAccounts(accounts);
+        const preferred = accounts.find((a) => a.isDefault) ?? accounts[0];
+        if (preferred?.pixKey) applyAccount(preferred);
+      })
+      .catch(() => {
+        /* sem contas salvas: o usuario digita a chave manualmente */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, currentUser?.id]);
+
+  const applyAccount = (account: UserBankAccount) => {
+    if (account.method === 'pix' && account.pixKey) {
+      const t = account.pixKeyType;
+      if (t === 'cpf' || t === 'phone' || t === 'email' || t === 'random') setPixKeyType(t);
+      setPixKey(account.pixKey);
+    } else if (account.method === 'bank_transfer') {
+      // Conta bancaria: a chave PIX vira o identificador textual do destino.
+      setPixKey(
+        `${account.bankName} · Ag ${account.bankAgency} · Cc ${account.bankAccount}${
+          account.holderDocument ? ` · ${account.holderName} (${account.holderDocument})` : ''
+        }`
+      );
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -153,6 +190,32 @@ export const WithdrawModal: React.FC<WithdrawModalProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Saved Accounts */}
+            {savedAccounts.length > 0 && (
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1.5 flex items-center gap-1.5">
+                  <Landmark className="w-3.5 h-3.5 text-[#00e701]" /> Usar conta salva
+                </label>
+                <select
+                  onChange={(e) => {
+                    const acc = savedAccounts.find((a) => a.id === e.target.value);
+                    if (acc) applyAccount(acc);
+                  }}
+                  defaultValue={savedAccounts.find((a) => a.isDefault)?.id ?? ''}
+                  className="w-full bg-[#161b22] border border-[#30363d] focus:border-[#00e701] rounded-xl px-3 py-2 text-xs text-white focus:outline-none"
+                >
+                  <option value="" disabled>Selecione uma conta...</option>
+                  {savedAccounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.label || (acc.method === 'pix' ? 'PIX' : 'Conta bancária')}
+                      {acc.isDefault ? ' (padrão)' : ''} —{' '}
+                      {acc.method === 'pix' ? acc.pixKey : `${acc.bankName} ${acc.bankAccount}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Pix Key Type Selector */}
             <div>

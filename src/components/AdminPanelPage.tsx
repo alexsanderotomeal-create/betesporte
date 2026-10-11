@@ -23,11 +23,16 @@ import {
   Plus,
   Save,
   Coins,
-  Zap
+  Zap,
+  Eye,
+  Download,
+  History
 } from 'lucide-react';
-import { UserAccount, DepositRequest, WithdrawRequest, HouseSettings } from '../types/auth';
+import { UserAccount, DepositRequest, WithdrawRequest, HouseSettings, ActivityLogItem } from '../types/auth';
 import { BetTicket } from '../types/betting';
 import { ElectionContest } from '../types/election';
+import { AdminUserDetailModal } from './AdminUserDetailModal';
+import { fetchActivityLogs } from '../services/dataService';
 
 export interface ElectionContestDraftInput {
   id?: string;
@@ -78,6 +83,8 @@ interface AdminPanelPageProps {
   isSyncing?: boolean;
   onTriggerSync?: () => void;
   onOpenApiSimulator?: () => void;
+  /** Recarrega a lista de usuarios (apos editar/creditar pelo detalhe). */
+  onRefreshUsers?: () => Promise<void>;
 }
 
 export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
@@ -107,11 +114,20 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
   isSyncing = false,
   onTriggerSync,
   onOpenApiSimulator,
+  onRefreshUsers,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'deposits' | 'withdrawals' | 'bets' | 'users' | 'settings' | 'elections'
+    'deposits' | 'withdrawals' | 'bets' | 'users' | 'settings' | 'elections' | 'logs'
   >('deposits');
   const [searchUser, setSearchUser] = useState<string>('');
+
+  // Detalhe/edicao de usuario
+  const [detailUserId, setDetailUserId] = useState<string | null>(null);
+
+  // Logs de auditoria (carregados sob demanda ao abrir a aba)
+  const [logs, setLogs] = useState<ActivityLogItem[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState('');
 
   // Confirmacao em dois cliques para liquidar: dinheiro nao se clica por engano.
   const [settleConfirm, setSettleConfirm] = useState<string | null>(null);
@@ -407,6 +423,52 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
     onSetUserRole(u.id, u.role === 'admin' ? 'user' : 'admin');
   };
 
+  useEffect(() => {
+    if (activeTab !== 'logs') return;
+    let cancelled = false;
+    setLogsLoading(true);
+    setLogsError('');
+    fetchActivityLogs()
+      .then((rows) => {
+        if (!cancelled) setLogs(rows);
+      })
+      .catch((err) => {
+        if (!cancelled) setLogsError(err instanceof Error ? err.message : 'Falha ao carregar logs.');
+      })
+      .finally(() => {
+        if (!cancelled) setLogsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+
+  const exportUsersCsv = () => {
+    const headers = [
+      'id', 'nome', 'email', 'cpf', 'telefone', 'perfil', 'status',
+      'saldo_real', 'saldo_bonus', 'kyc', 'cadastro',
+    ];
+    const escape = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const lines = [headers.join(',')];
+    filteredUsers.forEach((u) => {
+      lines.push(
+        [
+          u.id, u.name, u.email, u.cpf, u.phone, u.role, u.status,
+          u.wallet.realBalance, u.wallet.bonusBalance, u.kycStatus ?? '', u.createdAt,
+        ]
+          .map(escape)
+          .join(',')
+      );
+    });
+    const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `usuarios-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="min-h-screen bg-[#0b0e14] text-slate-100 flex flex-col">
       {/* Page Header */}
@@ -552,6 +614,18 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
           >
             <Vote className="w-3.5 h-3.5" />
             <span>Mercados Eleitorais</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('logs')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'logs'
+                ? 'bg-[#00e701] text-black shadow'
+                : 'text-slate-400 hover:text-white hover:bg-[#21262d]'
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>Logs de Auditoria</span>
           </button>
         </div>
       </div>
@@ -1004,6 +1078,15 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
               <span className="text-slate-400 font-mono text-[11px]">
                 {filteredUsers.length} usuários listados
               </span>
+
+              <button
+                onClick={exportUsersCsv}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-[#00e701]/60 text-slate-200 text-xs font-semibold transition-colors"
+                title="Exportar a lista filtrada para CSV"
+              >
+                <Download className="w-3.5 h-3.5 text-[#00e701]" />
+                <span className="hidden sm:inline">Exportar CSV</span>
+              </button>
             </div>
 
             <div className="bg-[#161b22] border border-[#252d3d] rounded-xl overflow-hidden shadow-sm">
@@ -1063,6 +1146,15 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
                       <td className="py-2.5 px-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           <button
+                            onClick={() => setDetailUserId(u.id)}
+                            className="px-2 py-1 rounded bg-sky-950/60 hover:bg-sky-900/60 text-sky-300 font-semibold text-[11px] flex items-center gap-1 transition-colors border border-sky-600/30"
+                            title="Abrir ficha completa do usuário"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Detalhes</span>
+                          </button>
+
+                          <button
                             onClick={() => setCreditUserId(u.id)}
                             className="px-2 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-[#00e701] font-semibold text-[11px] flex items-center gap-1 transition-colors"
                             title="Creditar saldo manual"
@@ -1100,6 +1192,55 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 6: AUDIT LOGS */}
+        {activeTab === 'logs' && (
+          <div className="flex flex-col gap-3 text-xs">
+            <div className="flex items-center justify-between text-slate-400 pb-1">
+              <span>Trilha de auditoria das ações administrativas e do sistema:</span>
+              <span className="font-mono text-[11px]">{logs.length} eventos</span>
+            </div>
+
+            {logsError && (
+              <div className="p-2.5 rounded-lg bg-rose-950/60 border border-rose-600/40 text-rose-300">
+                {logsError}
+              </div>
+            )}
+
+            <div className="bg-[#161b22] border border-[#252d3d] rounded-xl overflow-hidden">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-[#10141d] border-b border-[#21262d] text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+                    <th className="py-2.5 px-3">Data</th>
+                    <th className="py-2.5 px-3">Ação</th>
+                    <th className="py-2.5 px-3">Usuário</th>
+                    <th className="py-2.5 px-3">Detalhe</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#21262d]">
+                  {logsLoading ? (
+                    <tr>
+                      <td colSpan={4} className="py-10 text-center text-slate-500">Carregando…</td>
+                    </tr>
+                  ) : logs.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="py-10 text-center text-slate-500">Nenhum log registrado.</td>
+                    </tr>
+                  ) : (
+                    logs.map((log) => (
+                      <tr key={log.id} className="hover:bg-[#1a202c]">
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-slate-400">{log.createdAt}</td>
+                        <td className="py-2.5 px-3 font-bold text-white">{log.action}</td>
+                        <td className="py-2.5 px-3 font-mono text-[10px] text-slate-400">{log.userId ?? '—'}</td>
+                        <td className="py-2.5 px-3 text-slate-300">{log.detail ?? '—'}</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1846,6 +1987,17 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
           </div>
         </div>
       )}
+
+      {/* Ficha completa do usuario (detalhe/edicao/credito/KYC) */}
+      <AdminUserDetailModal
+        isOpen={Boolean(detailUserId)}
+        userId={detailUserId}
+        currentAdminId={currentAdminId}
+        onClose={() => setDetailUserId(null)}
+        onChanged={() => {
+          void onRefreshUsers?.();
+        }}
+      />
     </div>
   );
 };

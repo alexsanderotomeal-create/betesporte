@@ -8,7 +8,19 @@
  */
 
 import { describeSupabaseError, supabase } from '../lib/supabase';
-import type { UserAccount, DepositRequest, WithdrawRequest, HouseSettings } from '../types/auth';
+import type {
+  UserAccount,
+  DepositRequest,
+  WithdrawRequest,
+  HouseSettings,
+  UserBankAccount,
+  PixKeyType,
+  UserKyc,
+  UserPreferences,
+  NotificationItem,
+  ActivityLogItem,
+  ReferralInfo,
+} from '../types/auth';
 import type { Transaction } from '../types/betting';
 import type { Match, MatchStats, Market, OddChoice, SportId, BetSelection, BetTicket } from '../types/betting';
 import { ELECTION_SCOPE_LABEL } from '../types/election';
@@ -314,6 +326,7 @@ export function rowToProfile(row: RowProfile): UserAccount {
     // daily_deposit_limit nao existe no schema real; default de balcao.
     dailyDepositLimit: 5000,
     createdAt: formatDate(row.created_at),
+    kycStatus: row.kyc_status ?? null,
   };
 }
 
@@ -403,6 +416,350 @@ export async function updateProfileName(userId: string, name: string): Promise<v
     .update({ full_name: name })
     .eq('user_id', userId);
   if (error) throw new Error(describeSupabaseError(error));
+}
+
+/** Edicao do proprio perfil (nome + telefone). */
+export async function updateUserProfile(
+  userId: string,
+  patch: { name?: string; phone?: string }
+): Promise<void> {
+  const fields: Record<string, string> = {};
+  if (patch.name !== undefined) fields.full_name = patch.name.trim();
+  if (patch.phone !== undefined) fields.phone = patch.phone.trim();
+  if (Object.keys(fields).length === 0) return;
+
+  const { error } = await supabase
+    .from('profiles')
+    .update(fields)
+    .eq('user_id', userId);
+  if (error) throw new Error(describeSupabaseError(error));
+}
+
+// ---------------------------------------------------------------------------
+// Contas bancarias salvas
+// ---------------------------------------------------------------------------
+
+interface RowBankAccount {
+  id: string;
+  user_id: string;
+  label: string | null;
+  method: string;
+  pix_key_type: string | null;
+  pix_key: string | null;
+  holder_name: string | null;
+  holder_document: string | null;
+  bank_name: string | null;
+  bank_agency: string | null;
+  bank_account: string | null;
+  account_type: string | null;
+  is_default: boolean;
+  created_at: string;
+}
+
+export interface BankAccountInput {
+  label?: string;
+  method?: 'pix' | 'bank_transfer';
+  pixKeyType?: PixKeyType | null;
+  pixKey?: string;
+  holderName?: string;
+  holderDocument?: string;
+  bankName?: string;
+  bankAgency?: string;
+  bankAccount?: string;
+  accountType?: string;
+  isDefault?: boolean;
+}
+
+function rowToBankAccount(row: RowBankAccount): UserBankAccount {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    label: row.label ?? '',
+    method: row.method === 'bank_transfer' ? 'bank_transfer' : 'pix',
+    pixKeyType: (row.pix_key_type as PixKeyType | null) ?? null,
+    pixKey: row.pix_key ?? '',
+    holderName: row.holder_name ?? '',
+    holderDocument: row.holder_document ?? '',
+    bankName: row.bank_name ?? '',
+    bankAgency: row.bank_agency ?? '',
+    bankAccount: row.bank_account ?? '',
+    accountType: row.account_type ?? '',
+    isDefault: row.is_default,
+    createdAt: formatDate(row.created_at),
+  };
+}
+
+function bankAccountFields(input: BankAccountInput): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  if (input.label !== undefined) fields.label = input.label.trim() || null;
+  if (input.method !== undefined) fields.method = input.method;
+  if (input.pixKeyType !== undefined) fields.pix_key_type = input.pixKeyType;
+  if (input.pixKey !== undefined) fields.pix_key = input.pixKey.trim() || null;
+  if (input.holderName !== undefined) fields.holder_name = input.holderName.trim() || null;
+  if (input.holderDocument !== undefined) fields.holder_document = input.holderDocument.trim() || null;
+  if (input.bankName !== undefined) fields.bank_name = input.bankName.trim() || null;
+  if (input.bankAgency !== undefined) fields.bank_agency = input.bankAgency.trim() || null;
+  if (input.bankAccount !== undefined) fields.bank_account = input.bankAccount.trim() || null;
+  if (input.accountType !== undefined) fields.account_type = input.accountType.trim() || null;
+  return fields;
+}
+
+export async function fetchBankAccounts(userId: string): Promise<UserBankAccount[]> {
+  const { data, error } = await supabase
+    .from('user_bank_accounts')
+    .select('*')
+    .eq('user_id', userId)
+    .order('is_default', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(describeSupabaseError(error));
+  return ((data ?? []) as RowBankAccount[]).map(rowToBankAccount);
+}
+
+export async function createBankAccount(
+  userId: string,
+  input: BankAccountInput
+): Promise<UserBankAccount> {
+  // Sempre nasce como nao-padrao: o indice unico parcial barra dois defaults.
+  const { data, error } = await supabase
+    .from('user_bank_accounts')
+    .insert({ user_id: userId, ...bankAccountFields(input), is_default: false })
+    .select('*')
+    .single();
+  if (error) throw new Error(describeSupabaseError(error));
+
+  const account = rowToBankAccount(data as RowBankAccount);
+  if (input.isDefault) await setDefaultBankAccount(account.id);
+  return { ...account, isDefault: Boolean(input.isDefault) };
+}
+
+export async function updateBankAccount(
+  id: string,
+  input: BankAccountInput
+): Promise<void> {
+  const { error } = await supabase
+    .from('user_bank_accounts')
+    .update({ ...bankAccountFields(input), updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw new Error(describeSupabaseError(error));
+  if (input.isDefault) await setDefaultBankAccount(id);
+}
+
+export async function deleteBankAccount(id: string): Promise<void> {
+  const { error } = await supabase.from('user_bank_accounts').delete().eq('id', id);
+  if (error) throw new Error(describeSupabaseError(error));
+}
+
+export async function setDefaultBankAccount(id: string): Promise<void> {
+  const { error } = await supabase.rpc('user_set_default_bank_account', { p_id: id });
+  if (error) throw new Error(describeSupabaseError(error));
+}
+
+// ---------------------------------------------------------------------------
+// Preferencias (limite diario / autoexclusao)
+// ---------------------------------------------------------------------------
+
+export async function fetchPreferences(userId: string): Promise<UserPreferences> {
+  const { data, error } = await supabase
+    .from('user_preferences')
+    .select('daily_deposit_limit, self_exclusion_until')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(describeSupabaseError(error));
+  if (!data) return { dailyDepositLimit: null, selfExclusionUntil: null };
+  const row = data as { daily_deposit_limit: number | string | null; self_exclusion_until: string | null };
+  return {
+    dailyDepositLimit:
+      row.daily_deposit_limit == null ? null : toNumber(row.daily_deposit_limit),
+    selfExclusionUntil: row.self_exclusion_until ?? null,
+  };
+}
+
+export async function savePreferences(
+  userId: string,
+  patch: { dailyDepositLimit?: number | null; selfExclusionUntil?: string | null }
+): Promise<void> {
+  const fields: Record<string, unknown> = { user_id: userId, updated_at: new Date().toISOString() };
+  if (patch.dailyDepositLimit !== undefined) fields.daily_deposit_limit = patch.dailyDepositLimit;
+  if (patch.selfExclusionUntil !== undefined) fields.self_exclusion_until = patch.selfExclusionUntil;
+
+  const { error } = await supabase
+    .from('user_preferences')
+    .upsert(fields, { onConflict: 'user_id' });
+  if (error) throw new Error(describeSupabaseError(error));
+}
+
+// ---------------------------------------------------------------------------
+// KYC
+// ---------------------------------------------------------------------------
+
+interface RowKyc {
+  user_id: string;
+  document_type: string | null;
+  document_number: string | null;
+  document_url: string | null;
+  selfie_url: string | null;
+  status: string;
+  notes: string | null;
+  submitted_at: string;
+  reviewed_at: string | null;
+}
+
+function rowToKyc(row: RowKyc): UserKyc {
+  return {
+    userId: row.user_id,
+    documentType: row.document_type ?? '',
+    documentNumber: row.document_number ?? '',
+    documentUrl: row.document_url ?? '',
+    selfieUrl: row.selfie_url ?? '',
+    status: (row.status as UserKyc['status']) ?? 'pending',
+    notes: row.notes ?? '',
+    submittedAt: formatDate(row.submitted_at),
+    reviewedAt: row.reviewed_at ? formatDate(row.reviewed_at) : null,
+  };
+}
+
+export async function fetchKyc(userId: string): Promise<UserKyc | null> {
+  const { data, error } = await supabase
+    .from('user_kyc')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(describeSupabaseError(error));
+  return data ? rowToKyc(data as RowKyc) : null;
+}
+
+export async function uploadKycDocument(userId: string, file: File): Promise<string> {
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `${userId}/${Date.now()}-${safeName}`;
+  const { error } = await supabase.storage
+    .from('kyc-documents')
+    .upload(path, file, { upsert: true, contentType: file.type || undefined });
+  if (error) throw new Error(describeSupabaseError(error));
+  return path;
+}
+
+export async function getKycDocumentUrl(path: string): Promise<string | null> {
+  if (!path) return null;
+  const { data, error } = await supabase.storage
+    .from('kyc-documents')
+    .createSignedUrl(path, 3600);
+  if (error) return null;
+  return data?.signedUrl ?? null;
+}
+
+export async function submitKyc(
+  userId: string,
+  input: { documentType: string; documentNumber: string; documentUrl?: string }
+): Promise<void> {
+  const { error } = await supabase
+    .from('user_kyc')
+    .upsert(
+      {
+        user_id: userId,
+        document_type: input.documentType.trim() || null,
+        document_number: input.documentNumber.trim() || null,
+        document_url: input.documentUrl ?? null,
+        status: 'pending',
+        notes: null,
+        submitted_at: new Date().toISOString(),
+        reviewed_at: null,
+        reviewed_by: null,
+      },
+      { onConflict: 'user_id' }
+    );
+  if (error) throw new Error(describeSupabaseError(error));
+}
+
+// ---------------------------------------------------------------------------
+// Notificacoes
+// ---------------------------------------------------------------------------
+
+interface RowNotification {
+  id: number | string;
+  kind: string;
+  title: string;
+  message: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+export async function fetchNotifications(
+  userId: string,
+  limit = 30
+): Promise<NotificationItem[]> {
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(describeSupabaseError(error));
+  return ((data ?? []) as RowNotification[]).map((row) => ({
+    id: String(row.id),
+    kind: row.kind,
+    title: row.title,
+    message: row.message ?? '',
+    readAt: row.read_at,
+    createdAt: formatDate(row.created_at),
+  }));
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw new Error(describeSupabaseError(error));
+}
+
+export async function markAllNotificationsRead(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .is('read_at', null);
+  if (error) throw new Error(describeSupabaseError(error));
+}
+
+// ---------------------------------------------------------------------------
+// Indicacao e logs
+// ---------------------------------------------------------------------------
+
+export async function fetchReferralInfo(): Promise<ReferralInfo> {
+  const { data, error } = await supabase.rpc('user_referral_summary');
+  if (error) throw new Error(describeSupabaseError(error));
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | { referral_code: string | null; referred_count: number | string }
+    | null;
+  return {
+    referralCode: row?.referral_code ?? '',
+    referredCount: toNumber(row?.referred_count),
+    referredNames: [],
+  };
+}
+
+interface RowActivityLog {
+  id: number | string;
+  user_id: string | null;
+  action: string;
+  detail: string | null;
+  created_at: string;
+}
+
+export async function fetchActivityLogs(limit = 100): Promise<ActivityLogItem[]> {
+  const { data, error } = await supabase
+    .from('activity_logs')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(describeSupabaseError(error));
+  return ((data ?? []) as RowActivityLog[]).map((row) => ({
+    id: String(row.id),
+    userId: row.user_id,
+    action: row.action,
+    detail: row.detail,
+    createdAt: formatDate(row.created_at),
+  }));
 }
 
 // ---------------------------------------------------------------------------

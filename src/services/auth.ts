@@ -178,6 +178,30 @@ export async function resetPassword(newPassword: string): Promise<void> {
 }
 
 /**
+ * Troca de senha em sessao comum. Exige a senha atual: reautentica primeiro
+ * com signInWithPassword, e so entao chama updateUser. Sem isso, qualquer
+ * sessao vazada trocaria a senha sem conhecer a antiga.
+ */
+export async function changePassword(
+  email: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<void> {
+  if (newPassword.length < 8) {
+    throw new AuthError('unknown', 'A nova senha precisa ter ao menos 8 caracteres.');
+  }
+  const { error: reauthError } = await supabase.auth.signInWithPassword({
+    email: email.trim().toLowerCase(),
+    password: currentPassword,
+  });
+  if (reauthError) {
+    throw new AuthError('invalid_credentials', 'Senha atual incorreta.');
+  }
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw new Error(describeSupabaseError(error));
+}
+
+/**
  * Sessao -> conta do dominio.
  * Retorna null quando ha sessao mas o perfil nao existe (trigger nao rodou).
  */

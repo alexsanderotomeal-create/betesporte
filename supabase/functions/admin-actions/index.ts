@@ -39,7 +39,12 @@ interface ActionPayload {
     | 'delete_election_candidate'
     | 'delete_election_contest'
     | 'settle_bet'
-    | 'auto_settle_bets';
+    | 'auto_settle_bets'
+    | 'update_user'
+    | 'debit_user'
+    | 'get_user_detail'
+    | 'review_kyc'
+    | 'send_notification';
   requestId?: string;
   userId?: string;
   candidateId?: string;
@@ -50,6 +55,12 @@ interface ActionPayload {
   amount?: number;
   status?: 'active' | 'blocked';
   role?: 'user' | 'admin';
+  fields?: Record<string, unknown>;
+  kycStatus?: 'pending' | 'approved' | 'rejected';
+  notes?: string;
+  title?: string;
+  message?: string;
+  kind?: string;
   settings?: Record<string, unknown>;
   contest?: {
     id?: string;
@@ -167,6 +178,19 @@ Deno.serve(async (req: Request) => {
 
       if (txError) return json({ error: txError.message }, 409);
 
+      const { data: dep } = await admin
+        .from('deposits')
+        .select('user_id')
+        .eq('id', requestId)
+        .maybeSingle();
+      await notify(
+        admin,
+        (dep as { user_id?: string } | null)?.user_id,
+        'deposit',
+        'Depósito aprovado',
+        `Seu depósito de R$ ${Number(request.amount).toFixed(2)} foi creditado.`
+      );
+
       return json({ success: true, requestId, amount: request.amount });
     }
 
@@ -182,6 +206,20 @@ Deno.serve(async (req: Request) => {
       });
 
       if (error) return json({ error: error.message }, 409);
+
+      const { data: dep } = await admin
+        .from('deposits')
+        .select('user_id, amount')
+        .eq('id', requestId)
+        .maybeSingle();
+      await notify(
+        admin,
+        (dep as { user_id?: string } | null)?.user_id,
+        'deposit',
+        'Depósito não aprovado',
+        `Seu depósito de R$ ${Number((dep as { amount?: number } | null)?.amount ?? 0).toFixed(2)} foi recusado.`
+      );
+
       return json({ success: true, requestId });
     }
 
@@ -197,6 +235,20 @@ Deno.serve(async (req: Request) => {
       });
 
       if (error) return json({ error: error.message }, 409);
+
+      const { data: wdr } = await admin
+        .from('withdrawals')
+        .select('user_id, amount')
+        .eq('id', requestId)
+        .maybeSingle();
+      await notify(
+        admin,
+        (wdr as { user_id?: string } | null)?.user_id,
+        'withdraw',
+        'Saque aprovado',
+        `Seu saque de R$ ${Number((wdr as { amount?: number } | null)?.amount ?? 0).toFixed(2)} foi liberado.`
+      );
+
       return json({ success: true, requestId });
     }
 
@@ -211,6 +263,20 @@ Deno.serve(async (req: Request) => {
       });
 
       if (error) return json({ error: error.message }, 409);
+
+      const { data: wdr } = await admin
+        .from('withdrawals')
+        .select('user_id, amount')
+        .eq('id', requestId)
+        .maybeSingle();
+      await notify(
+        admin,
+        (wdr as { user_id?: string } | null)?.user_id,
+        'withdraw',
+        'Saque recusado',
+        `Seu saque de R$ ${Number((wdr as { amount?: number } | null)?.amount ?? 0).toFixed(2)} foi recusado e o valor estornado.`
+      );
+
       return json({ success: true, requestId });
     }
 
@@ -228,6 +294,15 @@ Deno.serve(async (req: Request) => {
       });
 
       if (error) return json({ error: error.message }, 500);
+
+      await notify(
+        admin,
+        userId,
+        'credit',
+        'Crédito na conta',
+        `Um crédito de R$ ${amount.toFixed(2)} foi adicionado à sua conta.`
+      );
+
       return json({ success: true, userId, amount });
     }
 
@@ -545,6 +620,25 @@ Deno.serve(async (req: Request) => {
       });
 
       if (error) return json({ error: error.message }, 409);
+
+      const { data: betRow } = await admin
+        .from('bets')
+        .select('user_id, actual_return')
+        .eq('id', betId)
+        .maybeSingle();
+      const paid = Number((betRow as { actual_return?: number } | null)?.actual_return ?? 0);
+      await notify(
+        admin,
+        (betRow as { user_id?: string } | null)?.user_id,
+        'bet',
+        'Aposta liquidada',
+        result === 'WON'
+          ? `Sua aposta foi ganha. Retorno de R$ ${paid.toFixed(2)} creditado.`
+          : result === 'VOID'
+            ? `Sua aposta foi anulada e a stake devolvida.`
+            : 'Sua aposta foi liquidada como perdida.'
+      );
+
       return json({ success: true, betId, result });
     }
 
@@ -578,6 +672,137 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    /**
+     * Edicao de conta pelo backoffice. Toda a validacao/whitelist acontece na
+     * RPC admin_update_user_atomic; aqui so repassamos os campos permitidos.
+     */
+    case 'update_user': {
+      const { userId, fields } = payload;
+      if (!userId || !fields || typeof fields !== 'object') {
+        return json({ error: 'userId e fields obrigatorios.' }, 400);
+      }
+
+      const allowed: Record<string, unknown> = {};
+      for (const key of [
+        'full_name',
+        'phone',
+        'document_number',
+        'status',
+        'role',
+        'is_verified',
+        'kyc_status',
+      ]) {
+        if (fields[key] !== undefined) allowed[key] = fields[key];
+      }
+      if (Object.keys(allowed).length === 0) {
+        return json({ error: 'Nenhum campo editavel informado.' }, 400);
+      }
+
+      const { error } = await admin.rpc('admin_update_user_atomic', {
+        p_user_id: userId,
+        p_fields: allowed,
+        p_reviewer_id: reviewerId,
+      });
+      if (error) return json({ error: error.message }, 409);
+      return json({ success: true, userId, fields: allowed });
+    }
+
+    case 'debit_user': {
+      const { userId, amount, message } = payload;
+      if (!userId || typeof amount !== 'number' || amount <= 0) {
+        return json({ error: 'userId e amount positivo obrigatorios.' }, 400);
+      }
+
+      const { error } = await admin.rpc('admin_debit_wallet_atomic', {
+        p_user_id: userId,
+        p_amount: amount,
+        p_description: message?.trim() || 'Debito manual pelo administrador',
+        p_reviewer_id: reviewerId,
+      });
+      if (error) return json({ error: error.message }, 409);
+
+      await notify(
+        admin,
+        userId,
+        'debit',
+        'Débito na conta',
+        `Um débito de R$ ${amount.toFixed(2)} foi aplicado à sua conta.`
+      );
+
+      return json({ success: true, userId, amount });
+    }
+
+    /**
+     * Detalhe completo de um usuario para o drawer do backoffice: perfil,
+     * carteira, pedidos, apostas e extrato — tudo via service_role, porque a
+     * lista global de extrato nao tem policy de admin.
+     */
+    case 'get_user_detail': {
+      const { userId } = payload;
+      if (!userId) return json({ error: 'userId obrigatorio.' }, 400);
+
+      const [profileRes, walletRes, depositsRes, withdrawalsRes, betsRes, ledgerRes, kycRes, bankRes] =
+        await Promise.all([
+          admin.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
+          admin.from('wallet_balances').select('*').eq('user_id', userId).maybeSingle(),
+          admin.from('deposits').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(50),
+          admin.from('withdrawals').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(50),
+          admin.from('bets').select('*').eq('user_id', userId).order('placed_at', { ascending: false }).limit(50),
+          admin.from('financial_ledger').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(100),
+          admin.from('user_kyc').select('*').eq('user_id', userId).maybeSingle(),
+          admin.from('user_bank_accounts').select('*').eq('user_id', userId).order('is_default', { ascending: false }),
+        ]);
+
+      return json({
+        profile: profileRes.data ?? null,
+        wallet: walletRes.data ?? null,
+        deposits: depositsRes.data ?? [],
+        withdrawals: withdrawalsRes.data ?? [],
+        bets: betsRes.data ?? [],
+        transactions: ledgerRes.data ?? [],
+        kyc: kycRes.data ?? null,
+        bankAccounts: bankRes.data ?? [],
+      });
+    }
+
+    case 'review_kyc': {
+      const { userId, kycStatus, notes } = payload;
+      if (!userId || !kycStatus) {
+        return json({ error: 'userId e kycStatus obrigatorios.' }, 400);
+      }
+      if (!['pending', 'approved', 'rejected'].includes(kycStatus)) {
+        return json({ error: 'kycStatus invalido.' }, 400);
+      }
+
+      const { error } = await admin.rpc('admin_review_kyc_atomic', {
+        p_user_id: userId,
+        p_status: kycStatus,
+        p_notes: notes?.trim() || null,
+        p_reviewer_id: reviewerId,
+      });
+      if (error) return json({ error: error.message }, 409);
+
+      await notify(
+        admin,
+        userId,
+        'kyc',
+        kycStatus === 'approved' ? 'Identidade verificada' : kycStatus === 'rejected' ? 'Verificação rejeitada' : 'Verificação em análise',
+        notes?.trim() || null
+      );
+
+      return json({ success: true, userId, kycStatus });
+    }
+
+    case 'send_notification': {
+      const { userId, title, message, kind } = payload;
+      if (!userId || !title || !title.trim()) {
+        return json({ error: 'userId e title obrigatorios.' }, 400);
+      }
+
+      await notify(admin, userId, kind ?? 'info', title.trim(), message?.trim() || null);
+      return json({ success: true, userId });
+    }
+
     default:
       return json({ error: `Acao desconhecida: ${payload.action}` }, 400);
   }
@@ -595,6 +820,25 @@ async function nextSortOrder(
     .limit(1)
     .maybeSingle();
   return (data?.sort_order ?? 0) + 1;
+}
+
+/**
+ * Aviso ao usuario. Best-effort: uma falha aqui nunca derruba a operacao de
+ * dinheiro que ja foi concluida na RPC.
+ */
+async function notify(
+  admin: ReturnType<typeof createClient>,
+  userId: string | undefined,
+  kind: string,
+  title: string,
+  message: string | null
+): Promise<void> {
+  if (!userId) return;
+  try {
+    await admin.from('notifications').insert({ user_id: userId, kind, title, message });
+  } catch {
+    // silencioso
+  }
 }
 
 function json(body: unknown, status = 200): Response {

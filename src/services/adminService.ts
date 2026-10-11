@@ -7,6 +7,7 @@
  */
 
 import { describeSupabaseError, supabase } from '../lib/supabase';
+import type { AdminUserDetail } from '../types/auth';
 
 /** Resumo retornado pela liquidacao automatica (auto_settle_bets). */
 export interface AutoSettleSummary {
@@ -33,7 +34,12 @@ export type AdminAction =
   | 'delete_election_candidate'
   | 'delete_election_contest'
   | 'settle_bet'
-  | 'auto_settle_bets';
+  | 'auto_settle_bets'
+  | 'update_user'
+  | 'debit_user'
+  | 'get_user_detail'
+  | 'review_kyc'
+  | 'send_notification';
 
 export interface AdminActionBody {
   requestId?: string;
@@ -46,6 +52,12 @@ export interface AdminActionBody {
   amount?: number;
   status?: 'active' | 'blocked';
   role?: 'user' | 'admin';
+  fields?: Record<string, unknown>;
+  kycStatus?: 'pending' | 'approved' | 'rejected';
+  notes?: string;
+  title?: string;
+  message?: string;
+  kind?: string;
   settings?: Record<string, unknown>;
   contest?: {
     id?: string;
@@ -164,4 +176,20 @@ export const adminActions = {
    */
   autoSettleBets: () =>
     invokeAdminActionData<AutoSettleSummary>('auto_settle_bets'),
+  /**
+   * Edita a conta de um usuario no backoffice. So os campos realmente enviados
+   * entram na whitelist da RPC admin_update_user_atomic.
+   */
+  updateUser: (userId: string, fields: Record<string, unknown>) =>
+    invokeAdminAction('update_user', { userId, fields }),
+  /** Debito manual (ajuste negativo) pelo backoffice. */
+  debitUser: (userId: string, amount: number, message?: string) =>
+    invokeAdminAction('debit_user', { userId, amount, message }),
+  /** Detalhe completo do usuario (perfil, carteira, pedidos, apostas, extrato). */
+  getUserDetail: (userId: string) =>
+    invokeAdminActionData<AdminUserDetail>('get_user_detail', { userId }),
+  reviewKyc: (userId: string, kycStatus: 'pending' | 'approved' | 'rejected', notes?: string) =>
+    invokeAdminAction('review_kyc', { userId, kycStatus, notes }),
+  sendNotification: (userId: string, title: string, message?: string, kind?: string) =>
+    invokeAdminAction('send_notification', { userId, title, message, kind }),
 };

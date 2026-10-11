@@ -1256,6 +1256,13 @@ export default function App() {
         isSyncing={isSyncing}
         onTriggerSync={handleTriggerSync}
         onOpenApiSimulator={() => setIsApiModalOpen(true)}
+        onRefreshUsers={async () => {
+          try {
+            setUsers(await fetchAllProfiles());
+          } catch {
+            /* lista permanece como esta */
+          }
+        }}
       />
     );
   }
@@ -1530,6 +1537,9 @@ export default function App() {
           setIsHistoryOpen(true);
         }}
         onLogout={handleLogout}
+        onRefreshAccount={async () => {
+          if (currentUser) await loadAccountData(currentUser.id);
+        }}
       />
 
       <ElectionOfficialModal
