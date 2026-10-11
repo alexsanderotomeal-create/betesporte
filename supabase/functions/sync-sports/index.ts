@@ -772,12 +772,24 @@ async function syncLeague(
   return upsert.data?.id as string;
 }
 
+/**
+ * Chave do time no banco: a ESPN reaproveita o MESMO id numerico em esportes
+ * diferentes (o id 2029 e Palmeiras no futebol e um time universitario no
+ * volei). Sem o prefixo de esporte, o upsert por external_key sobrescrevia o
+ * nome de um clube com o do time de outro esporte ("Palmeiras" virava
+ * "Arkansas-Pine Bluff Golden Lions"). O prefixo isola cada esporte.
+ */
+function teamExternalKey(sport: string, espnId: string): string {
+  return `${sport}:${espnId}`;
+}
+
 async function syncTeam(
   admin: ReturnType<typeof createClient>,
+  sport: string,
   team: EspnTeam,
   teamMap: Map<string, Record<string, unknown>>
 ): Promise<TeamRef> {
-  const externalKey = String(team.id);
+  const externalKey = teamExternalKey(sport, String(team.id));
   const logo =
     team.logos?.[0]?.href ??
     team.logo ??
@@ -924,8 +936,8 @@ async function persistEvent(
   }
 
   const leagueId = await syncLeague(admin, league, catalog.leagues);
-  const homeTeamRef = await syncTeam(admin, homeTeam, catalog.teams);
-  const awayTeamRef = await syncTeam(admin, awayTeam, catalog.teams);
+  const homeTeamRef = await syncTeam(admin, league.sport, homeTeam, catalog.teams);
+  const awayTeamRef = await syncTeam(admin, league.sport, awayTeam, catalog.teams);
 
   const matchId = await syncMatch(
     admin,
