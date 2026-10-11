@@ -1,5 +1,5 @@
 /**
- * Chamadas ao backoffice (Edge Function admin-actions).
+ * Chamada ao backoffice (Edge Function admin-actions).
  *
  * Toda operacao que mexe em dinheiro passa pelo servidor com service_role. Nao
  * ha, neste arquivo, nenhuma escrita direta em `wallets`: a RLS proibe e o
@@ -7,6 +7,16 @@
  */
 
 import { describeSupabaseError, supabase } from '../lib/supabase';
+
+/** Resumo retornado pela liquidacao automatica (auto_settle_bets). */
+export interface AutoSettleSummary {
+  settled_won: number;
+  settled_lost: number;
+  settled_void: number;
+  skipped_pending: number;
+  skipped_unresolved: number;
+  skipped_election: number;
+}
 
 export type AdminAction =
   | 'approve_deposit'
@@ -22,7 +32,8 @@ export type AdminAction =
   | 'save_election_candidate'
   | 'delete_election_candidate'
   | 'delete_election_contest'
-  | 'settle_bet';
+  | 'settle_bet'
+  | 'auto_settle_bets';
 
 export interface AdminActionBody {
   requestId?: string;
@@ -84,6 +95,35 @@ export async function invokeAdminAction(
   }
 }
 
+/**
+ * Variante que devolve o corpo da Edge Function (para acoes com resposta,
+ * como o resumo da liquidacao automatica). A validacao de erro e a mesma.
+ */
+export async function invokeAdminActionData<T>(
+  action: AdminAction,
+  body: AdminActionBody = {}
+): Promise<T> {
+  const { data, error } = await supabase.functions.invoke('admin-actions', {
+    body: { action, ...body },
+  });
+
+  if (error) {
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      const parsed = (await context.json().catch(() => null)) as { error?: string } | null;
+      if (parsed?.error) throw new Error(parsed.error);
+    }
+    throw new Error(describeSupabaseError(error));
+  }
+
+  if (data && typeof data === 'object' && 'error' in data) {
+    const parsed = data as { error?: string };
+    if (parsed.error) throw new Error(parsed.error);
+  }
+
+  return (data ?? {}) as T;
+}
+
 export const adminActions = {
   approveDeposit: (requestId: string) => invokeAdminAction('approve_deposit', { requestId }),
   rejectDeposit: (requestId: string) => invokeAdminAction('reject_deposit', { requestId }),
@@ -118,4 +158,10 @@ export const adminActions = {
    */
   settleBet: (betId: string, result: 'WON' | 'LOST' | 'VOID', amount?: number) =>
     invokeAdminAction('settle_bet', { betId, result, amount }),
+  /**
+   * Varre apostas abertas, confronta com o placar final das partidas e
+   * liquida as resolvidas por lote. Retorna o resumo do que aconteceu.
+   */
+  autoSettleBets: () =>
+    invokeAdminActionData<AutoSettleSummary>('auto_settle_bets'),
 };

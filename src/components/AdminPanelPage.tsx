@@ -22,7 +22,8 @@ import {
   Trash2,
   Plus,
   Save,
-  Coins
+  Coins,
+  Zap
 } from 'lucide-react';
 import { UserAccount, DepositRequest, WithdrawRequest, HouseSettings } from '../types/auth';
 import { BetTicket } from '../types/betting';
@@ -71,6 +72,8 @@ interface AdminPanelPageProps {
   onDeleteElectionCandidate?: (candidateId: string) => Promise<void>;
   onDeleteElectionContest?: (contestId: string) => Promise<void>;
   onSettleBet: (betId: string, result: 'WON' | 'LOST' | 'VOID') => void;
+  /** Dispara a liquidacao automatica em lote (mesma RPC do cron da VPS). */
+  onAutoSettleBets: () => Promise<void>;
   onBack: () => void;
   isSyncing?: boolean;
   onTriggerSync?: () => void;
@@ -99,6 +102,7 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
   onDeleteElectionCandidate,
   onDeleteElectionContest,
   onSettleBet,
+  onAutoSettleBets,
   onBack,
   isSyncing = false,
   onTriggerSync,
@@ -111,6 +115,17 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
 
   // Confirmacao em dois cliques para liquidar: dinheiro nao se clica por engano.
   const [settleConfirm, setSettleConfirm] = useState<string | null>(null);
+  const [autoSettling, setAutoSettling] = useState(false);
+
+  const handleAutoSettleClick = async () => {
+    if (autoSettling) return;
+    setAutoSettling(true);
+    try {
+      await onAutoSettleBets();
+    } finally {
+      setAutoSettling(false);
+    }
+  };
 
   // Settings form state
   const [settingsForm, setSettingsForm] = useState<HouseSettings>(houseSettings);
@@ -803,14 +818,29 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
         {/* Tab 3: BET SETTLEMENT */}
         {activeTab === 'bets' && (
           <div className="flex flex-col gap-3 text-xs">
-            <div className="flex items-center justify-between text-slate-400 pb-1">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-slate-400 pb-1">
               <span>
                 Apostas de todos os usuarios. Confirmar o resultado faz o servidor
                 pagar (ou anular) e gravar no extrato do apostador.
               </span>
-              <span className="font-mono text-[11px]">
-                {openBets.length} em aberto · {bets.length} no histórico
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[11px]">
+                  {openBets.length} em aberto · {bets.length} no histórico
+                </span>
+                <button
+                  onClick={handleAutoSettleClick}
+                  disabled={autoSettling}
+                  className="px-3 py-1.5 rounded-lg bg-sky-600/20 border border-sky-500/40 hover:bg-sky-600/40 text-sky-300 font-extrabold text-xs uppercase flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  title="Confronta cada aposta aberta com o placar final e liquida ganhas/perdidas/anuladas automaticamente."
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  {autoSettling ? (
+                    <span>Processando...</span>
+                  ) : (
+                    <span>Liquidar automaticamente</span>
+                  )}
+                </button>
+              </div>
             </div>
 
             {bets.length === 0 ? (

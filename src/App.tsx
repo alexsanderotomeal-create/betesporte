@@ -955,6 +955,40 @@ export default function App() {
     await refreshBets(electionContests);
   };
 
+  /**
+   * Liquidacao automatica em lote (mesma RPC do cron da VPS): confronta cada
+   * aposta aberta com o placar final e liquida ganhas/perdidas/anuladas. A
+   * tela so mostra o resumo; o pagamento acontece no servidor.
+   */
+  const handleAutoSettleBets = async () => {
+    try {
+      const summary = await adminActions.autoSettleBets();
+      const done: string[] = [];
+      if (summary.settled_won > 0)
+        done.push(`${summary.settled_won} ganha${summary.settled_won === 1 ? '' : 's'}`);
+      if (summary.settled_lost > 0)
+        done.push(`${summary.settled_lost} perdida${summary.settled_lost === 1 ? '' : 's'}`);
+      if (summary.settled_void > 0)
+        done.push(`${summary.settled_void} anulada${summary.settled_void === 1 ? '' : 's'}`);
+
+      const skipped = summary.skipped_pending + summary.skipped_unresolved;
+      if (done.length > 0) {
+        setToast(
+          `Liquidacao automatica: ${done.join(', ')}` +
+            (skipped > 0 ? `. ${skipped} seguem em aberto.` : '.')
+        );
+      } else if (skipped > 0) {
+        setToast('Nenhuma aposta liquidada agora; as demais seguem em aberto para revisao.');
+      } else {
+        setToast('Nenhuma aposta em aberto para liquidar.');
+      }
+    } catch (err) {
+      setToast(toastMessage(err, 'Falha na liquidacao automatica.'));
+    }
+    await refreshAdminBets();
+    await refreshBets(electionContests);
+  };
+
   const handleSaveHouseSettings = async (newSettings: HouseSettings): Promise<boolean> => {
     try {
       await adminActions.saveHouseSettings({ ...newSettings });
@@ -1217,6 +1251,7 @@ export default function App() {
         onDeleteElectionCandidate={handleDeleteElectionCandidate}
         onDeleteElectionContest={handleDeleteElectionContest}
         onSettleBet={handleSettleBet}
+        onAutoSettleBets={handleAutoSettleBets}
         onBack={() => setAdminViewOpen(false)}
         isSyncing={isSyncing}
         onTriggerSync={handleTriggerSync}

@@ -38,7 +38,8 @@ interface ActionPayload {
     | 'save_election_candidate'
     | 'delete_election_candidate'
     | 'delete_election_contest'
-    | 'settle_bet';
+    | 'settle_bet'
+    | 'auto_settle_bets';
   requestId?: string;
   userId?: string;
   candidateId?: string;
@@ -545,6 +546,36 @@ Deno.serve(async (req: Request) => {
 
       if (error) return json({ error: error.message }, 409);
       return json({ success: true, betId, result });
+    }
+
+    /**
+     * Liquidacao automatica: varre apostas OPEN, confronta cada selecao com o
+     * resultado final da partida e liquida por lote (mesma RPC do cron da VPS).
+     * O admin que disparou vira o reviewer registrado em cada liquidacao.
+     */
+    case 'auto_settle_bets': {
+      const { data, error } = await admin.rpc('auto_settle_bets', {
+        p_reviewer_id: reviewerId,
+      });
+      if (error) return json({ error: error.message }, 409);
+
+      const row = (Array.isArray(data) ? data[0] : data) as {
+        settled_won?: number;
+        settled_lost?: number;
+        settled_void?: number;
+        skipped_pending?: number;
+        skipped_unresolved?: number;
+        skipped_election?: number;
+      } | null;
+
+      return json(row ?? {
+        settled_won: 0,
+        settled_lost: 0,
+        settled_void: 0,
+        skipped_pending: 0,
+        skipped_unresolved: 0,
+        skipped_election: 0,
+      });
     }
 
     default:
