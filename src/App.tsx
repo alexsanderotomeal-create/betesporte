@@ -1470,6 +1470,7 @@ export default function App() {
         minDeposit={houseSettings.minDeposit}
         welcomeBonusEnabled={houseSettings.welcomeBonusEnabled}
         welcomeBonusPercent={houseSettings.welcomeBonusPercent}
+        pixEnabled={houseSettings.pixEnabled}
         usdtEnabled={houseSettings.usdtEnabled}
         usdtWalletAddress={houseSettings.usdtWalletAddress}
         usdtRate={houseSettings.usdtRate}

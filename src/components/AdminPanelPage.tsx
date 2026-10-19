@@ -1402,6 +1402,24 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
                 bancária da casa.
               </span>
 
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsForm.pixEnabled}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, pixEnabled: e.target.checked })}
+                  className="rounded text-[#00e701] focus:ring-[#00e701]"
+                />
+                <span className="text-sm text-slate-200 font-semibold">
+                  Habilitar depósitos via PIX para os clientes
+                </span>
+              </label>
+              {!settingsForm.pixEnabled && (
+                <span className="text-[11px] text-amber-400 leading-relaxed">
+                  PIX desativado: os clientes não verão a opção de depósito por PIX. Os dados
+                  abaixo continuam salvos e voltam a valer ao reativar.
+                </span>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-slate-300 font-semibold block mb-1">
@@ -1503,18 +1521,18 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
               </div>
             </div>
 
-            {/* Depósito USDT (carteira TRC-20) */}
+            {/* Depósito USDT (carteira BEP-20) */}
             <div className="pt-3 border-t border-[#21262d] flex flex-col gap-3">
               <div className="flex items-center gap-1.5">
                 <Coins className="w-4 h-4 text-[#26a17b]" />
                 <span className="font-bold text-white text-sm">
-                  Depósito por Carteira USDT (TRC-20)
+                  Depósito por Carteira USDT (BEP-20)
                 </span>
               </div>
               <span className="text-[11px] text-slate-400 leading-relaxed">
-                O cliente envia USDT para o endereço abaixo (rede TRC-20), cola o TXID e o
-                pedido entra na fila manual de depósitos. A cotação converte o valor em R$ para
-                USDT na tela do cliente.
+                O cliente envia USDT para o endereço abaixo (rede BEP-20 / BNB Smart Chain),
+                cola o TXID e o pedido entra na fila manual de depósitos. A cotação converte o
+                valor em R$ para USDT na tela do cliente.
               </span>
 
               <label className="flex items-center gap-2.5 cursor-pointer">
@@ -1532,13 +1550,13 @@ export const AdminPanelPage: React.FC<AdminPanelPageProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="sm:col-span-2">
                   <label className="text-slate-300 font-semibold block mb-1">
-                    Endereço TRC-20 da casa:
+                    Endereço BEP-20 da casa (BNB Smart Chain):
                   </label>
                   <input
                     type="text"
                     value={settingsForm.usdtWalletAddress}
                     onChange={(e) => setSettingsForm({ ...settingsForm, usdtWalletAddress: e.target.value })}
-                    placeholder="T..."
+                    placeholder="0x..."
                     disabled={!settingsForm.usdtEnabled}
                     className={`w-full bg-[#161b22] border border-[#30363d] focus:border-[#26a17b] rounded-xl px-3 py-2 text-white font-mono focus:outline-none ${
                       settingsForm.usdtEnabled ? '' : 'opacity-50 cursor-not-allowed'

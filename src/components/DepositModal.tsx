@@ -34,9 +34,11 @@ interface DepositModalProps {
   welcomeBonusEnabled?: boolean;
   /** Percentual do bônus de boas-vindas (ex.: 100 = +100% no primeiro depósito). */
   welcomeBonusPercent?: number;
-  /** Se o depósito por USDT (TRC-20) está habilitado nas configurações da casa. */
+  /** Se o depósito via PIX está habilitado nas configurações da casa. */
+  pixEnabled?: boolean;
+  /** Se o depósito por USDT (BEP-20 / BNB Smart Chain) está habilitado. */
   usdtEnabled?: boolean;
-  /** Endereço TRC-20 da casa para onde o cliente envia o USDT. */
+  /** Endereço BEP-20 (BNB Smart Chain) da casa para onde o cliente envia o USDT. */
   usdtWalletAddress?: string;
   /** Cotação interna: R$ por 1 USDT (ex.: 5.20). Usada para converter o valor. */
   usdtRate?: number;
@@ -52,6 +54,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
   minDeposit = 10,
   welcomeBonusEnabled = true,
   welcomeBonusPercent = 100,
+  pixEnabled = true,
   usdtEnabled = false,
   usdtWalletAddress = '',
   usdtRate = 5.2,
@@ -80,11 +83,13 @@ export const DepositModal: React.FC<DepositModalProps> = ({
       setCopiedAddress(false);
       setTimeLeft(900);
       setIncludeBonus(welcomeBonusEnabled);
-      setMethod('pix');
+      // Abre ja no metodo disponivel: PIX quando habilitado, senao USDT.
+      const usdtReady = usdtEnabled && usdtWalletAddress.trim().length > 0;
+      setMethod(pixEnabled !== false ? 'pix' : usdtReady ? 'usdt' : 'pix');
       setUsdtTxid('');
       setSourceWallet('');
     }
-  }, [isOpen, welcomeBonusEnabled]);
+  }, [isOpen, welcomeBonusEnabled, pixEnabled, usdtEnabled, usdtWalletAddress]);
 
   // Countdown timer when on the payment steps
   useEffect(() => {
@@ -95,6 +100,19 @@ export const DepositModal: React.FC<DepositModalProps> = ({
     return () => clearInterval(interval);
   }, [step]);
 
+  // Se o metodo selecionado deixa de estar disponivel (admin desliga PIX/USDT),
+  // troca para o outro metodo quando existir.
+  useEffect(() => {
+    if (!isOpen) return;
+    const usdtReady = usdtEnabled && usdtWalletAddress.trim().length > 0;
+    const pixReady = pixEnabled !== false;
+    setMethod((prev) => {
+      if (prev === 'pix' && !pixReady && usdtReady) return 'usdt';
+      if (prev === 'usdt' && !usdtReady && pixReady) return 'pix';
+      return prev;
+    });
+  }, [isOpen, pixEnabled, usdtEnabled, usdtWalletAddress]);
+
   if (!isOpen) return null;
 
   const bonusPct = welcomeBonusPercent ?? 100;
@@ -104,6 +122,13 @@ export const DepositModal: React.FC<DepositModalProps> = ({
   const usdtRateEffective = usdtRate > 0 ? usdtRate : 1;
   const usdtAmount = amount / usdtRateEffective;
   const usdtAvailable = usdtEnabled && usdtWalletAddress.trim().length > 0;
+  const pixAvailable = pixEnabled !== false;
+  const anyMethodAvailable = pixAvailable || usdtAvailable;
+  const submitDisabled =
+    amount < minDeposit ||
+    !anyMethodAvailable ||
+    (method === 'usdt' && !usdtAvailable) ||
+    (method === 'pix' && !pixAvailable);
 
   const handleSelectAmount = (val: number) => {
     setAmount(val);
@@ -120,6 +145,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
   };
 
   const handleGeneratePix = async () => {
+    if (!pixAvailable) return;
     if (amount < minDeposit) return;
     const generatedTxid = `PIX-${Date.now().toString().slice(-8)}`;
     const code = generatePixCode(amount, generatedTxid, pixConfig);
@@ -245,7 +271,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
             <div>
               <span className="text-sm font-bold text-white block leading-tight">
                 {method === 'usdt'
-                  ? 'Depósito por carteira USDT (TRC-20)'
+                  ? 'Depósito por carteira USDT (BEP-20)'
                   : 'Depósito Instantâneo via PIX'}
               </span>
               <span className="text-[10px] text-slate-400">
@@ -266,8 +292,19 @@ export const DepositModal: React.FC<DepositModalProps> = ({
         {/* STEP 1: Select Amount & Bonus */}
         {step === 'amount' && (
           <div className="p-4 sm:p-6 flex flex-col gap-4">
+            {/* Nenhum metodo habilitado pelo painel */}
+            {!anyMethodAvailable && (
+              <div className="bg-rose-950/40 border border-rose-500/40 rounded-xl p-3 flex items-start gap-2 text-xs text-rose-300">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  Os depósitos estão temporariamente indisponíveis. Tente novamente mais tarde
+                  ou fale com o suporte.
+                </span>
+              </div>
+            )}
+
             {/* Método de pagamento (PIX ou USDT) */}
-            {usdtAvailable && (
+            {pixAvailable && usdtAvailable && (
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => setMethod('pix')}
@@ -287,7 +324,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
                       : 'bg-[#161b22] border-[#252d3d] text-slate-300 hover:border-slate-500'
                   }`}
                 >
-                  ₮ USDT (TRC-20)
+                  ₮ USDT (BEP-20)
                 </button>
               </div>
             )}
@@ -379,10 +416,10 @@ export const DepositModal: React.FC<DepositModalProps> = ({
 
             {/* Submit Button */}
             <button
-              disabled={amount < minDeposit || (method === 'usdt' && !usdtAvailable)}
+              disabled={submitDisabled}
               onClick={method === 'usdt' ? handleGenerateUsdt : handleGeneratePix}
               className={`w-full py-3 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                amount >= minDeposit && !(method === 'usdt' && !usdtAvailable)
+                !submitDisabled
                   ? method === 'usdt'
                     ? 'bg-[#26a17b] hover:bg-[#218a68] active:scale-[0.99] text-black shadow-lg shadow-[#26a17b]/25'
                     : 'bg-[#00e701] hover:bg-[#00c901] active:scale-[0.99] text-black shadow-lg shadow-[#00e701]/25'
@@ -488,7 +525,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
           </div>
         )}
 
-        {/* STEP 2b: USDT TRC-20 Address & TXID */}
+        {/* STEP 2b: USDT BEP-20 Address & TXID */}
         {step === 'usdt' && (
           <div className="p-4 sm:p-6 flex flex-col items-center gap-4 text-center">
             {/* Countdown notice */}
@@ -511,7 +548,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
                 USDT {usdtAmount.toFixed(2)}
               </span>
               <span className="text-[11px] text-slate-400 block font-medium">
-                (rede TRC-20 · crédito de R$ {amount.toFixed(2)})
+                (rede BEP-20 · crédito de R$ {amount.toFixed(2)})
               </span>
               {effectiveIncludeBonus && (
                 <span className="text-[11px] text-amber-400 block font-medium">
@@ -520,10 +557,10 @@ export const DepositModal: React.FC<DepositModalProps> = ({
               )}
             </div>
 
-            {/* House TRC-20 Wallet Address */}
+            {/* House BEP-20 Wallet Address */}
             <div className="w-full flex flex-col gap-1.5">
               <div className="flex items-center justify-between text-[11px] text-slate-400">
-                <span>Endereço da casa (rede TRC-20):</span>
+                <span>Endereço da casa (rede BEP-20):</span>
                 {copiedAddress && <span className="text-[#26a17b] font-bold">Copiado!</span>}
               </div>
               <div className="relative">
@@ -583,8 +620,8 @@ export const DepositModal: React.FC<DepositModalProps> = ({
             {/* Instructions */}
             <p className="text-[11px] text-slate-400 leading-relaxed">
               Envie o valor acima de qualquer carteira ou exchange usando a rede{' '}
-              <strong>TRC-20 (Tron)</strong>. Envios por outras redes (BEP-20, ERC-20)
-              podem ser perdidos. Após o envio, cole o TXID para análise.
+              <strong>BEP-20 (BNB Smart Chain)</strong>. Envios por outras redes (TRC-20,
+              ERC-20) podem ser perdidos. Após o envio, cole o TXID para análise.
             </p>
 
             {/* Action Button: registers the request server-side */}

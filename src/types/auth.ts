@@ -185,6 +185,8 @@ export interface HouseSettings {
   autoApproveThreshold: number;
   houseMarginPercent: number;
   maintenanceMode: boolean;
+  /** Se o deposito via PIX esta habilitado para os clientes (painel da casa). */
+  pixEnabled: boolean;
   /** Tipo da chave PIX no QR de deposito: auto/random/phone/email/cpf/cnpj. */
   pixKeyType: string;
   /** Chave PIX que os clientes veem no QR de deposito. Vem de system_settings. */
@@ -197,9 +199,9 @@ export interface HouseSettings {
   bankName: string;
   bankAgency: string;
   bankAccount: string;
-  /** Se o deposito por carteira USDT (TRC-20) esta habilitado para o cliente. */
+  /** Se o deposito por carteira USDT (BEP-20 / BNB Smart Chain) esta habilitado. */
   usdtEnabled: boolean;
-  /** Endereco da carteira TRC-20 da casa onde o cliente envia o USDT. */
+  /** Endereco da carteira BEP-20 (BNB Smart Chain) da casa onde o cliente envia USDT. */
   usdtWalletAddress: string;
   /** Cotacao interna: reais necessarios por 1 USDT (ex.: 5.20 = R$5,20 por USDT). */
   usdtRate: number;
