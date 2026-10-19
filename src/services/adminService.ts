@@ -39,7 +39,8 @@ export type AdminAction =
   | 'debit_user'
   | 'get_user_detail'
   | 'review_kyc'
-  | 'send_notification';
+  | 'send_notification'
+  | 'delete_user';
 
 export interface AdminActionBody {
   requestId?: string;
@@ -192,4 +193,9 @@ export const adminActions = {
     invokeAdminAction('review_kyc', { userId, kycStatus, notes }),
   sendNotification: (userId: string, title: string, message?: string, kind?: string) =>
     invokeAdminAction('send_notification', { userId, title, message, kind }),
+  /**
+   * Exclusao definitiva da conta. Remove perfil, carteira, historico e o
+   * auth.users numa transacao. A RPC recusa excluir a si mesmo ou outro admin.
+   */
+  deleteUser: (userId: string) => invokeAdminAction('delete_user', { userId }),
 };

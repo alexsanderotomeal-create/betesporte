@@ -44,7 +44,8 @@ interface ActionPayload {
     | 'debit_user'
     | 'get_user_detail'
     | 'review_kyc'
-    | 'send_notification';
+    | 'send_notification'
+    | 'delete_user';
   requestId?: string;
   userId?: string;
   candidateId?: string;
@@ -803,6 +804,25 @@ Deno.serve(async (req: Request) => {
       }
 
       await notify(admin, userId, kind ?? 'info', title.trim(), message?.trim() || null);
+      return json({ success: true, userId });
+    }
+
+    /**
+     * Exclusao definitiva da conta (remover usuarios de teste). A RPC apaga
+     * perfil, carteira, historico e o auth.users numa transacao. Aqui so
+     * autorizamos e repassamos; as protecoes (nao excluir a si mesmo nem outro
+     * admin) vivem na propria RPC.
+     */
+    case 'delete_user': {
+      const { userId } = payload;
+      if (!userId) return json({ error: 'userId obrigatorio.' }, 400);
+
+      const { error } = await admin.rpc('admin_delete_user_atomic', {
+        p_user_id: userId,
+        p_reviewer_id: reviewerId,
+      });
+      if (error) return json({ error: error.message }, 409);
+
       return json({ success: true, userId });
     }
 

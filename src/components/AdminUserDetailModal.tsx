@@ -14,6 +14,7 @@ import {
   Bell,
   FileText,
   ShieldAlert,
+  Trash2,
 } from 'lucide-react';
 import { adminActions } from '../services/adminService';
 import { getKycDocumentUrl } from '../services/dataService';
@@ -88,6 +89,10 @@ export const AdminUserDetailModal: React.FC<AdminUserDetailModalProps> = ({
   const [editVerified, setEditVerified] = useState(false);
   const [editMsg, setEditMsg] = useState('');
 
+  // Exclusao definitiva da conta
+  const [deleteInput, setDeleteInput] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
   // Carteira
   const [amount, setAmount] = useState('100');
   const [reason, setReason] = useState('');
@@ -124,6 +129,7 @@ export const AdminUserDetailModal: React.FC<AdminUserDetailModalProps> = ({
   useEffect(() => {
     if (isOpen && userId) {
       setTab('overview');
+      setDeleteInput('');
       void load();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -162,6 +168,27 @@ export const AdminUserDetailModal: React.FC<AdminUserDetailModalProps> = ({
 
   const p = detail?.profile;
   const w = detail?.wallet;
+
+  const isAdminAccount = p?.role === 'admin' || p?.role === 'super_admin';
+  const deletePhrase = p?.email ?? '';
+  const canDelete =
+    deleteInput.trim().length > 0 &&
+    deleteInput.trim().toLowerCase() === deletePhrase.toLowerCase();
+
+  const handleDelete = async () => {
+    if (!userId || !canDelete || deleting) return;
+    setDeleting(true);
+    setError('');
+    try {
+      await adminActions.deleteUser(userId);
+      onChanged?.();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao excluir a conta.');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
@@ -283,6 +310,39 @@ export const AdminUserDetailModal: React.FC<AdminUserDetailModalProps> = ({
                     Salvar alterações
                   </button>
                   {editMsg && <span className="text-emerald-400 text-[11px]">{editMsg}</span>}
+
+                  <div className="mt-4 border border-rose-600/40 bg-rose-950/30 rounded-xl p-3 flex flex-col gap-2">
+                    <span className="font-bold text-rose-300 flex items-center gap-1.5">
+                      <Trash2 className="w-4 h-4" /> Zona de perigo
+                    </span>
+                    {isAdminAccount ? (
+                      <span className="text-rose-200/80 text-[11px]">
+                        Contas de administrador não podem ser excluídas.
+                      </span>
+                    ) : (
+                      <>
+                        <span className="text-rose-200/80 text-[11px]">
+                          Exclui definitivamente o perfil, a carteira, o histórico e o acesso
+                          do usuário. Não há como desfazer. Para confirmar, digite o e-mail
+                          <span className="font-mono text-rose-100"> {deletePhrase || '—'}</span>.
+                        </span>
+                        <input
+                          value={deleteInput}
+                          onChange={(e) => setDeleteInput(e.target.value)}
+                          placeholder={deletePhrase || 'E-mail do usuário'}
+                          className={`${inputCls} font-mono`}
+                        />
+                        <button
+                          onClick={handleDelete}
+                          disabled={!canDelete || deleting || busy}
+                          className="self-start px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:bg-rose-900/50 disabled:text-rose-300/50 text-white font-extrabold text-xs uppercase flex items-center gap-1.5"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          {deleting ? 'Excluindo…' : 'Excluir conta definitivamente'}
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
 
