@@ -32,8 +32,9 @@ end $$;
 do $$
 declare w record;
 begin
-  -- o bando real tem trigger sync_profile_to_wallet_balances (AFTER INSERT/UPDATE
-  -- em profiles): a wallet do novo usuario nasce zerada ja no cadastro.
+  -- o banco real tem trigger seed_wallet_on_profile_insert (AFTER INSERT em
+  -- profiles): a wallet do novo usuario nasce zerada no cadastro. Updates de
+  -- perfil NAO mexem mais na wallet (migration 0016).
   select wallet_balance, bonus_balance, locked_balance, yield_balance into w
     from public.wallet_balances
    where user_id = '33333333-3333-3333-3333-333333333333';
@@ -42,7 +43,7 @@ begin
      or w.locked_balance <> 0 or w.yield_balance <> 0 then
     raise exception 'FAIL: wallet nova com saldo fora de zero';
   end if;
-  raise notice 'ok: wallet zerada criada pelo trigger sync_profile_to_wallet_balances';
+  raise notice 'ok: wallet zerada criada pelo trigger seed_wallet_on_profile_insert';
 end $$;
 
 \echo '--- 2. deposito: pedido trava valor, aprovacao credita + bonus'
